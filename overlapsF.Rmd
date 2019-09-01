@@ -1,0 +1,785 @@
+---
+title: "overlap"
+author: "Emer Gilmartin"
+date: "17/2/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(knitr)
+
+library(plyr)
+library(dplyr)
+
+opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+library(moments)
+```
+
+# Introduction ###
+
+This uses the database created in CC_MakeDB for statistics on silences and overlaps in dataset of 6 conversations.
+
+# Dataset
+
+First, set working directory to CC_DATA_SEPT
+
+
+```{r}
+
+setwd("/Users/emergilmartin/Dropbox/PHD_final/CASUAL_EG_KL_JE_2016/CC_DATA_EG_KL_0616/CC_DATA_SEPT")
+
+```
+
+
+Read in data frame produced by CC_MakeDB.Rmd
+
+
+```{r}
+
+ccdf <- readRDS("ccdf.RDA")
+
+# check what variables are there
+
+names(ccdf)
+
+df_all <- ccdf
+```
+
+Create dataframe containing only labels from Praat overlap tiers in each conversation
+```{r}
+
+# make overlaps df
+
+overlaps <- df_all[df_all$tier =='overlap',]
+
+summary(overlaps$tier)
+
+table(overlaps$tier)
+
+# test labels - there were a few {SL} in the overlap labels which should not have been there. Checked back with Praat and found in ABCDEF_SOC
+# Cleaned up ABCDEF_SOC to BESTENDtest.txt, which is now in MakeDB.RMD to generate corrected ccdf
+# NEED TO FIX PRAAT AT SOME STAGE
+
+# This is just a sanity test that the corrected version is being used
+
+sl<- grep(pattern='SL', x=overlaps$label)
+sl
+
+```
+
+Create new variables showing number of concurrent speakers in interval, nosp, and number of concurrent laughers, nolg, in overlaps
+
+```{r}
+overlaps$lablen <- nchar(overlaps$label)
+
+
+# labels from Praat overlap tier have either 4 characters ({GS}) and are global silence 
+# or have some multiple of 5 characters, with each 5 denoting a speaker and an activity (speech or laughter)
+# a{SP}b{LG}c{SP} would indicate a and c are speaking and b is laughing and everyone else is silent
+
+# create columns for number of speakers, nosp, and number of laughers, nolg,
+# using regmatches to create vector of number of appearances of "SP" or "LG" in labels
+
+# Number of speakers
+overlaps$nosp <- lengths(regmatches(overlaps$label,gregexpr('SP',overlaps$label)))
+
+# Number of laughers
+overlaps$nolg <- lengths(regmatches(overlaps$label,gregexpr('LG',overlaps$label)))
+```
+
+# OVERALL SPEECH DISTRIBUTION
+
+This shows the proportions of silence, single speaker speech, 2 person overlap, 3 person overlap, etc., for the corpus as a whole. It should be noted that laughter has been treated as silence for this preliminary analysis.
+```{r}
+table(overlaps$nosp)
+tapply(overlaps$dur, overlaps$nosp,sum)
+tapply(overlaps$dur, overlaps$nosp,sum)*100/sum(overlaps$dur)
+barplot(tapply(overlaps$dur, overlaps$nosp,sum)*100/sum(overlaps$dur),col = c('red','yellow','blue','orange','white', 'pink'), legend=rownames(tapply(overlaps$dur, overlaps$nosp,sum)))
+
+```
+
+From the table it can be seen that silence accounts for 23.42% of conversational time, while single party speech accounts for 68.49%. Two speaker overlap is 7.6% while three party accounts for under 0.5%. Overlap involving more than three persons is very rare in the corpus, with .02% of total conversational time taken up by 4 party overlap (21 instances), while there is only one instance of 5 party overlap in the entire corpus.
+
+
+# SPEECH DISTRIBUTION BY CONVERSATION
+
+```{r}
+
+table(overlaps$nosp,overlaps$conv)
+# There is a problem when trying to use tapply and prop.table as there were zero values for 4 and 5 on some conversations which led to NAs in tables of duration by conversation and number speaking so prop.table would not work
+# SOLUTION: do tapply and change NAs to zeros - THIINK ABOUT WHETHER THIS WOULD WORK WITH MEANS!!!
+
+# myta is a function to do the above - take df and variable (df$xxx), tapply for duration against number of speakers/laughers and conversation
+# and replace NAs with zeros. 
+# output is table which can then be prop.tabled and barplotted
+
+myta <- function(x,nowhat) {
+    mytab <- tapply(x$dur,list(nowhat,x$conv),sum)
+    mytab[is.na(mytab)]<-0
+    
+    return(mytab)
+}
+
+# Get table of total duration of speech by 0,1,2.. speakers per conversation with NAs replaced by zeros
+myt<-myta(overlaps,overlaps$nosp)
+
+myt
+
+# Now get prop.table by row in percentages
+prop.table(myt,2)*100
+barplot(prop.table(myt,2)*100, main='No.of speakers by duration per conversation %', col = c('red','yellow','blue','orange','white', 'pink'),legend=rownames(myt))
+
+#create dummy variable for graphs - to get 3 possibilities 0=2+, 1=1,2=0
+overlaps$shnosp<-20
+
+summary(overlaps$nosp)
+
+table(overlaps$nosp)
+
+for(i in 1:length(overlaps$dur)){
+    if(overlaps$nosp[i]==0){
+        overlaps$shnosp[i]<-2
+    } else if(overlaps$nosp[i]==1){
+        overlaps$shnosp[i]<-1
+    }else {
+        overlaps$shnosp[i]<-0
+    }
+}
+
+table(overlaps$shnosp)
+
+my2<-tapply(overlaps$dur,list(overlaps$shnosp,overlaps$conv),sum)
+
+barplot(prop.table(my2,2)*100, main='No.of speakers by duration per conversation %')
+
+pdf('ov_conv2.pdf', width=8, height = 5)
+barplot(prop.table(my2,2)*100, main='No.of speakers by duration per conversation %')
+dev.off()
+
+```
+
+# SPEECH DISTRIBUTION BY CONVERSATION OMITTING SILENCE
+
+```{r}
+
+# get df of speech numbers greater than 0 - so no silence
+spnosil <- overlaps[overlaps$nosp != 0,]
+
+table(spnosil$nosp)
+
+table(spnosil$nosp, spnosil$conv)
+tapply(spnosil$dur, spnosil$nosp,sum)*100/sum(spnosil$dur)
+
+barplot(tapply(spnosil$dur, spnosil$nosp,sum)*100/sum(spnosil$dur), main='speech overlap distribution (omit silence) %', col = c('yellow','blue','orange','white', 'pink'), legend=rownames(tapply(spnosil$dur, spnosil$nosp,sum)))
+
+sp<-myta(spnosil,spnosil$nosp)
+sp
+
+prop.table(sp,2)*100
+
+barplot(prop.table(sp,2)*100, main='speech overlap distribution per conversation (omit silence) %', col = c('yellow','blue','orange','white','pink'),legend=rownames(sp))
+```
+
+# Speech Proportions in Chat vs Chunk
+
+Proportion of overlap (0,1,2...) by chatchunk
+
+```{r}
+# Everything against chatchunk
+
+table(overlaps$nosp,overlaps$chatchunk)
+
+
+
+# Ammend myta to make mytach - over chunks rather than conversations
+
+mytach <- function(x,nowhat) {
+    mytab <- tapply(x$dur,list(nowhat,x$chatchunk),sum)
+    mytab[is.na(mytab)]<-0
+    
+    return(mytab)
+}
+
+# sil,speech - overlaps, nosp
+
+mytch <- mytach(overlaps,overlaps$nosp)
+
+mytch
+
+prop.table(mytch,2)*100
+
+barplot(prop.table(mytch,2)*100, main='speech overlap distribution per chatchunk (inc silence) %', col = c('red','yellow','blue','orange','white','pink'), legend=rownames(mytch))
+
+# speech no sil - spnosil, nosp
+
+spch <- mytach(spnosil,spnosil$nosp)
+spch
+
+prop.table(spch,2)*100
+
+barplot(prop.table(spch,2)*100, main='speech overlap distribution per chatchunk (omit silence) %', col = c('yellow','blue','orange','white','pink'),legend=rownames(spch))
+
+
+# with shnosp so only speech silence overlap rather than all n
+
+# sil,speech - overlaps, nosp
+
+mytch <- mytach(overlaps,overlaps$shnosp)
+
+mytch
+
+prop.table(mytch,2)*100
+
+pdf('spov_sxo2.pdf', width=8, height = 5)
+par(mfrow=c(1,2))
+barplot(prop.table(mytch,2)*100, main='Speech, Silence, Overlap (%)', col = c('black','gray40','gray80'),names=c('Chat','Chunk'))
+
+# speech no sil - spnosil, nosp
+
+spch <- mytach(spnosil,spnosil$shnosp)
+spch
+
+prop.table(spch,2)*100
+
+barplot(prop.table(spch,2)*100, main='Speech, Overlap (%)', col = c('black','gray40','gray80'),names=c('Chat','hunk'))
+dev.off()
+par(mfrow=c(1,1))
+
+```
+# LOOK AT DISTANCE FROM OVERLAPS TO END OF CHAT CHUNNK
+
+```{r}
+# use spnosil
+# histogram of distance from any overlap to end of chat or chunk
+over2<-spnosil[spnosil$nosp>=2,]
+summary(over2)
+median(over2$dnext)
+over2[over2$dnext == max(over2$dnext),]
+summary(df_all$dur[df_all$tier=='phases'])
+
+hist(df_all$dur[df_all$tier=='phases'], breaks=seq(0,300,by=5))
+
+summary(over2$dnext)
+hist(over2$dnext, breaks=seq(0,300,by=5))
+
+summary(over2$dlast)
+hist(over2$dlast, breaks=seq(0,300,by=5))
+
+hist(log(df_all$dur[df_all$tier=='phases']))
+
+hist(log(over2$dnext))
+
+hist(log(over2$dlast))
+
+par(mfrow=c(1,3))
+boxplot(over2$dnext~over2$chatchunk)
+hist(over2$dnext[over2$chatchunk=='o'])
+hist(over2$dnext[over2$chatchunk=='x'])
+
+# Proportional distance from next boundary
+
+median(over2$dnext/over2$chl)
+
+par(mfrow=c(1,2))
+hist(over2$dnext/over2$chl)
+boxplot(over2$dnext/over2$chl~over2$chatchunk)
+
+wilcox.test(dnext/chl ~ chatchunk, data = over2)
+
+```
+
+
+
+# OVERALL LAUGHER DISTRIBUTION
+```{r}
+table(overlaps$nolg)
+tapply(overlaps$dur, overlaps$nolg,sum)
+tapply(overlaps$dur, overlaps$nolg,sum)*100/sum(overlaps$dur)
+barplot(tapply(overlaps$dur, overlaps$nolg,sum)*100/sum(overlaps$dur),col = c('red','yellow','blue','orange','white', 'pink'), legend=rownames(tapply(overlaps$dur, overlaps$nolg,sum)))
+```
+
+# OVERALL DISTRIBUTION OF NUMBER OF LAUGHERS PER CONVERSATION
+```{r}
+# Now get table and proptable for proportional duration per number of laughers in each conversation
+myu<- myta(overlaps, overlaps$nolg)
+
+myu
+
+prop.table(myu,2)*100
+
+
+# plot results - barplot shows proportions of 0,1,2,3,... simultaneous speakers in each conversation
+# NOTE: 0 is silence, 1 is single speaker, 2 is 2 speakers ...
+
+# NEED TO SORT OUT LEGEND POSITIONING
+# 
+# par(mfrow=c(1,2))
+# 
+# barplot(prop.table(myt,2)*100, main='No.of speakers distribution per conversation %', col = c('red','yellow','blue','orange','white', 'pink'))
+barplot(prop.table(myu,2)*100, main='number of laughers distribution per conversation %', col = c('red','yellow','blue','orange','white', 'pink'))
+# 
+#        
+# par(mfrow=c(1,1))
+
+
+```
+
+
+# laughter distribution by conversation (omit silence)
+```{r}
+lgnosil <- overlaps[overlaps$nolg != 0,]
+
+table(lgnosil$nolg)
+
+table(lgnosil$nolg, lgnosil$conv)
+
+barplot(tapply(lgnosil$dur, lgnosil$nolg,sum)*100/sum(lgnosil$dur),main='laughter overlap distribution (omit silence) %', col = c('yellow','blue','orange','white', 'pink'), legend=rownames(tapply(lgnosil$dur, lgnosil$nolg,sum)))
+
+lg<- myta(lgnosil,lgnosil$nolg)
+lg
+prop.table(lg,2)*100
+
+barplot(prop.table(lg,2)*100, main='laughter overlap distribution per conversation (omit silence) %', col = c('yellow','blue','orange','white','pink'),legend=rownames(lg))
+
+# par(mfrow=c(1,2))
+# barplot(prop.table(sp,2)*100, main='speech overlap distribution per conversation (omit silence) %', col = c('yellow','blue','orange','white','pink'),legend=rownames(sp))
+# barplot(prop.table(lg,2)*100, main='laughter overlap distribution per conversation (omit silence) %', col = c('yellow','blue','orange','white','pink'),legend=rownames(lg))
+# par(mfrow=c(1,1))
+
+
+
+```
+
+
+
+# LAUGHER PROPORTIONS IN CHAT VS CHUNK
+
+```{r}
+
+table(overlaps$nolg,overlaps$chatchunk)
+
+myuch <- mytach(overlaps,overlaps$nolg)
+
+myuch
+
+prop.table(myuch,2)*100
+
+barplot(prop.table(myuch,2)*100, main='laughter overlap distribution per chatchunk (inc silence) %', col = c('red','yellow','blue','orange','white','pink'),legend=rownames(myuch))
+
+
+# laughter no sil - lgnosil, nolg
+
+lgch<-mytach(lgnosil,lgnosil$nolg)
+lgch
+
+prop.table(lgch,2)*100
+
+barplot(prop.table(lgch,2)*100, main='laughter overlap distribution per chatchunk (omit silence) %', col = c('yellow','blue','orange','white','pink'),legend=rownames(lgch))
+
+par(mfrow=c(1,2))
+barplot(prop.table(spch,2)*100, main='speech overlap distribution per chatchunk (omit silence) %', col = c('yellow','blue','orange','white','pink'),legend=rownames(spch))
+barplot(prop.table(lgch,2)*100, main='laughter overlap distribution per chatchunk (omit silence) %', col = c('yellow','blue','orange','white','pink'),legend=rownames(lgch))
+par(mfrow=c(1,1))
+
+```
+
+Now check per conversation
+
+```{r}
+overlapsA<-overlaps[overlaps$conv=='A',]
+
+summary(overlapsA)
+
+#speech overlap proportion including silences
+mytchA <- mytach(overlapsA,overlapsA$nosp)
+
+mytchA
+ 
+propA<- prop.table(mytchA,2)*100
+
+propA
+
+barplot(propA, main='speech overlap distribution per chatchunk in A (inc silence) %', col = c('red','yellow','blue','orange','white','pink'))
+
+overlapsB<-overlaps[overlaps$conv=='B',]
+mytchB <- mytach(overlapsB,overlapsB$nosp)
+
+mytchB
+
+propB<- prop.table(mytchB,2)*100
+propB
+ 
+barplot(propB, main='speech overlap distribution per chatchunk in B (inc silence) %', col = c('red','yellow','blue','orange','white','pink'))
+
+overlapsC<-overlaps[overlaps$conv=='C',]
+mytchC <- mytach(overlapsC,overlapsC$nosp)
+
+mytchC
+ 
+propC<- prop.table(mytchC,2)*100
+propC
+
+barplot(propC, main='speech overlap distribution per chatchunk in C (inc silence) %', col = c('red','yellow','blue','orange','white','pink'))
+ 
+overlapsD<-overlaps[overlaps$conv=='D',]
+mytchD <- mytach(overlapsD,overlapsD$nosp)
+ 
+mytchD
+ 
+propD<- prop.table(mytchD,2)*100
+propD
+ 
+barplot(propD, main='speech overlap distribution per chatchunk in D (inc silence) %', col = c('red','yellow','blue','orange','white','pink'))
+ 
+overlapsE<-overlaps[overlaps$conv=='E',]
+mytchE <- mytach(overlapsE,overlapsE$nosp)
+
+mytchE
+
+propE<- prop.table(mytchE,2)*100
+propE
+
+barplot(propE, main='speech overlap distribution per chatchunk in E (inc silence) %', col = c('red','yellow','blue','orange','white','pink'))
+
+overlapsF<-overlaps[overlaps$conv=='F',]
+mytchF <- mytach(overlapsF,overlapsF$nosp)
+
+mytchF
+
+propF<- prop.table(mytchF,2)*100
+propF
+
+barplot(propF, main='speech overlap distribution per chatchunk in F (inc silence) %', col = c('red','yellow','blue','orange','white','pink'))
+
+# speech without silences
+
+spnosilA <- spnosil[spnosil$conv=='A',]
+
+spchA <- mytach(spnosilA,spnosilA$nosp)
+spchA
+
+prop.table(spchA,2)*100
+
+barplot(prop.table(spchA,2)*100, main='speech overlap distribution per chatchunk in A (omit silence) %', col = c('yellow','blue','orange','white','pink'))
+
+
+spnosilB <- spnosil[spnosil$conv=='B',]
+
+spchB <- mytach(spnosilB,spnosilB$nosp)
+spchB
+
+prop.table(spchB,2)*100
+
+barplot(prop.table(spchB,2)*100, main='speech overlap distribution per chatchunk in B (omit silence) %', col = c('yellow','blue','orange','white','pink'))
+
+spnosilC <- spnosil[spnosil$conv=='C',]
+
+spchC <- mytach(spnosilC,spnosilC$nosp)
+spchC
+
+prop.table(spchC,2)*100
+
+barplot(prop.table(spchC,2)*100, main='speech overlap distribution per chatchunk in C (omit silence) %', col = c('yellow','blue','orange','white','pink'))
+
+spnosilD <- spnosil[spnosil$conv=='D',]
+
+spchD <- mytach(spnosilD,spnosilD$nosp)
+spchD
+
+prop.table(spchD,2)*100
+
+barplot(prop.table(spchD,2)*100, main='speech overlap distribution per chatchunk in D (omit silence) %', col = c('yellow','blue','orange','white','pink'))
+
+spnosilE <- spnosil[spnosil$conv=='E',]
+
+spchE <- mytach(spnosilE,spnosilE$nosp)
+spchE
+
+prop.table(spchE,2)*100
+
+barplot(prop.table(spchE,2)*100, main='speech overlap distribution per chatchunk in E (omit silence) %', col = c('yellow','blue','orange','white','pink'))
+
+spnosilF <- spnosil[spnosil$conv=='F',]
+
+spchF <- mytach(spnosilF,spnosilF$nosp)
+spchF
+
+prop.table(spchF,2)*100
+
+barplot(prop.table(spchF,2)*100, main='speech overlap distribution per chatchunk in F (omit silence) %', col = c('yellow','blue','orange','white','pink'))
+
+
+```
+Get plots by conversation of only chunk and only chat - speech and silence
+
+```{r}
+# get df of only chunks
+
+chukov <- overlaps[overlaps$chatchunk=='x',]
+
+chov<- myta(chukov, chukov$nosp)
+
+chov
+
+prop.table(chov,2)*100
+
+barplot(prop.table(chov,2)*100, main='silence and speech distribution in chunks per conversation %', col = c('red','yellow','blue','orange','white', 'pink'),legend=rownames(chov))
+
+# get df of only chats
+
+chatov <- overlaps[overlaps$chatchunk=='o',]
+
+chav<- myta(chatov, chatov$nosp)
+
+chav
+
+prop.table(chav,2)*100
+
+barplot(prop.table(chav,2)*100, main='silence and speech distribution in chat per conversation %', col = c('red','yellow','blue','orange','white', 'pink'),legend=rownames(chav))
+
+
+```
+
+
+Get plots by conversation of only chunk and only chat - speech only
+
+```{r}
+# get df omitting silence in chunks
+
+chusp <- chukov[chukov$nosp !=0,]
+
+chunksp<- myta(chusp, chusp$nosp)
+
+chunksp
+
+prop.table(chunksp,2)*100
+
+barplot(prop.table(chunksp,2)*100, main='speech distribution in chunks per conversation %', col = c('yellow','blue','orange','white', 'pink'),legend=rownames(chunksp))
+
+# get df of only chats
+
+chasp <- chatov[chatov$nosp !=0,]
+
+chatsp<- myta(chasp, chasp$nosp)
+
+chatsp
+prop.table(chatsp,2)*100
+
+barplot(prop.table(chatsp,2)*100, main='speech distribution in chat per conversation %', col = c('yellow','blue','orange','white', 'pink'),legend=rownames(chatsp))
+```
+
+
+Laughter in chunks only or chat only side by side
+
+Get plots by conversation of only chunk and only chat - laughter only
+
+```{r}
+# get df omitting silence in chunks
+ 
+chulg <- chukov[chukov$nolg !=0,]
+
+summary(chulg)
+# 
+chunklg<- myta(chulg, chulg$nolg)
+# 
+chunklg
+# 
+prop.table(chunklg,2)*100
+
+barplot(prop.table(chunklg,2)*100, main='laughter distribution in chunks per conversation %', col = c('yellow','blue','orange','white', 'pink'),legend=rownames(chunklg))
+
+# get df of only chats
+
+chalg <- chatov[chatov$nolg !=0,]
+
+chatlg<- myta(chalg, chalg$nolg)
+ 
+chatlg
+prop.table(chatlg,2)*100
+ 
+barplot(prop.table(chatlg,2)*100, main='laughter distribution in chat per conversation %', col = c('yellow','blue','orange','white', 'pink'),legend=rownames(chatlg))
+```
+Look at mean proportion of silence per chunk vs mean proportion of silence per chat by duration - is there a significant difference?
+Same for overlap - proportion of single speaker per chunk (as prop of total speech), same for 2 person overlap as prop of total overlap, etc.
+
+EXPERIMENT - would myta work with means?
+
+I would  worry that getting means where the value NA is replaced with 0 would make the number of values in divisor higher, thus making mean smaller
+Check
+
+```{r}
+
+meanta <- function(x,nowhat) {
+    mytab <- tapply(x$dur,list(nowhat,x$conv),mean)
+    mytab[is.na(mytab)]<-0
+    
+    return(mytab)
+}
+
+meant<-meanta(overlaps,overlaps$nosp)
+
+# with NAs still in
+
+meantman<- tapply(overlaps$dur,list(overlaps$nosp,overlaps$conv),mean)
+
+meant
+meantman
+
+
+prop.table(meant,2)*100
+
+barplot(prop.table(meant,2)*100, main='speech overlap distribution means', col = c('yellow','blue','orange','white','pink'))
+```
+
+Todo
+
+1. Get distribution of percentage speech, silence, overlap (nosp -= 1,0, >1) by chunk, chat
+would involve tabling duration sums of speech, silence, laughter by chunk over total duration of each chunk 
+write function to do this
+
+```{r}
+
+
+
+# make database of chat and chunk only
+
+chdb <- df_all[df_all$tier =='phases',]
+summary(chdb)
+
+#loop through each chat or chunk and add value for sum of duration of silence, single speaker, 2+ speakers
+
+for (i in 1:length(chdb$tier)) {
+    thisch <- chdb$t_name[i]
+    #get df of overlaps with this t_name
+    thischdf <- overlaps[overlaps$t_name == thisch,]
+    chdb$dur0[i] <- sum(thischdf$dur[thischdf$nosp==0])
+    chdb$dur1[i] <- sum(thischdf$dur[thischdf$nosp==1])
+    chdb$dur2p[i] <- sum(thischdf$dur[thischdf$nosp>1])
+    chdb$dur2[i] <- chdb$dur0[i]+chdb$dur1[i]+chdb$dur2p[i]
+}
+
+summary(chdb)
+
+# SILENCE PROPORTION
+par(mfrow = c(1,3))
+hist(chdb$dur0/chdb$dur2,col='red',xlim=c(0,.7),ylim=c(0,130))
+abline(v=mean(chdb$dur0/chdb$dur2))
+abline(v=median(chdb$dur0/chdb$dur2),col = "grey")
+
+cho <-chdb[chdb$chatchunk=='o',]
+hist(cho$dur0/cho$dur2,col='yellow',ylim=c(0,130),xlim=c(0,.7))
+abline(v=mean(cho$dur0/cho$dur2))
+abline(v=median(cho$dur0/cho$dur2),col = "grey")
+
+chu <-chdb[chdb$chatchunk=='x',]
+hist(chu$dur0/chu$dur2, col='blue',ylim=c(0,130),xlim=c(0,.7))
+abline(v=mean(chu$dur0/chu$dur2))
+abline(v=median(chu$dur0/chu$dur2),col = "grey")
+
+hist(log(chdb$dur0/chdb$dur2),col='red')
+hist(log(cho$dur1/cho$dur2),col='yellow')
+hist(log(cho$dur2p/cho$dur2),col='blue')
+
+
+
+par(mfrow=c(1,1))
+
+boxplot(chdb$dur0/chdb$dur2~chdb$chatchunk)
+wilcox.test(dur0/dur2~chatchunk, data = chdb)
+
+# wilcox.test(dur0/dur2~chatchunk, data = chdb,paired=TRUE)
+
+boxplot(chdb$dur1/chdb$dur2~chdb$chatchunk)
+wilcox.test(dur1/dur2~chatchunk, data = chdb)
+
+boxplot(chdb$dur2p/chdb$dur2~chdb$chatchunk)
+wilcox.test(dur2p/dur2~chatchunk, data = chdb)
+
+# SINGLE SPEAAKER PROPORTION
+par(mfrow = c(1,3))
+hist(chdb$dur1/chdb$dur2,col='red',xlim=c(0,1),ylim=c(0,130))
+abline(v=mean(chdb$dur1/chdb$dur2))
+abline(v=median(chdb$dur1/chdb$dur2),col = "grey")
+
+cho <-chdb[chdb$chatchunk=='o',]
+hist(cho$dur1/cho$dur2,col='yellow',ylim=c(0,130),xlim=c(0,1))
+abline(v=mean(cho$dur1/cho$dur2))
+abline(v=median(cho$dur1/cho$dur2),col = "grey")
+
+chu <-chdb[chdb$chatchunk=='x',]
+hist(chu$dur1/chu$dur2, col='blue',ylim=c(0,130),xlim=c(0,1))
+abline(v=mean(chu$dur1/chu$dur2))
+abline(v=median(chu$dur1/chu$dur2),col = "grey")
+
+par(mfrow=c(1,1))
+
+
+boxplot(chdb$dur1/chdb$dur2~chdb$chatchunk)
+wilcox.test(dur1/dur2~chatchunk, data = chdb)
+
+```
+
+Laughter
+    
+    
+```{r} 
+#loop through each chat or chunk and add value for sum of duration of silence, single speaker, 2+ speakers
+lchdb<-chdb
+
+for (i in 1:length(lchdb$tier)) {
+    lthisch <- lchdb$t_name[i]
+    #get df of overlaps with this t_name
+    lthischdf <- overlaps[overlaps$t_name == lthisch,]
+    lchdb$dur0[i] <- sum(thischdf$dur[lthischdf$nolg==0])
+    lchdb$dur1[i] <- sum(thischdf$dur[lthischdf$nolg==1])
+    lchdb$dur2p[i] <- sum(thischdf$dur[lthischdf$nolg>1])
+    lchdb$dur2[i] <- lchdb$dur0[i]+lchdb$dur1[i]+lchdb$dur2p[i]
+    lchdb$durl[i] <- lchdb$dur1[i]+lchdb$dur2p[i]
+}
+
+summary(lchdb)
+
+par(mfrow = c(1,3))
+# all laughter proportion of all phases
+hist((lchdb$dur1+lchdb$dur2p)/lchdb$dur2,col='red')
+
+# all laughter proportion of chats
+cholg <-lchdb[lchdb$chatchunk=='o',]
+hist((cholg$dur1+cholg$dur2p)/cholg$dur2,col='yellow')
+
+# all laughter as prop of chunks
+chul <-lchdb[lchdb$chatchunk=='x',]
+hist((chul$dur1+chul$dur2p)/chul$dur2, col='blue')
+
+hist(log((lchdb$dur1+lchdb$dur2p)/lchdb$dur2),col='red')
+hist(log((cholg$dur1+cholg$dur2p)/cholg$dur2),col='yellow')
+hist(log((chul$dur1+chul$dur2p)/chul$dur2),col='blue')
+
+
+
+par(mfrow=c(1,1))
+
+boxplot(log(lchdb$dur1/lchdb$durl)~lchdb$chatchunk)
+wilcox.test(log(dur1/durl)~chatchunk, data = lchdb)
+
+# boxplot(lchdb$dur1/lchdb$dur2~lchdb$chatchunk)
+# wilcox.test(dur0/dur2~chatchunk, data = lchdb)
+
+# wilcox.test(dur0/dur2~chatchunk, data = lchdb,paired=TRUE)
+
+boxplot(lchdb$dur1/lchdb$durl~lchdb$chatchunk)
+wilcox.test(dur1/durl~chatchunk, data = lchdb)
+
+boxplot(lchdb$dur1/lchdb$durl~lchdb$chatchunk)
+wilcox.test(dur1/durl~chatchunk, data = lchdb)
+
+# boxplot(lchdb$dur2p/lchdb$dur2~lchdb$chatchunk)
+# wilcox.test(dur2p/dur2~chatchunk, data = lchdb)
+
+
+```

@@ -1,0 +1,2641 @@
+---
+title: "MAR2019_DESCRIPTIVE"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(knitr)
+opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+library(moments)
+library(ggplot2)
+```
+
+## Introduction
+This document contains the code for statistics on dataset of 6 long (c 1 hr) multiparty casual conversations.
+
+This uses the database created in CC_MakeDB_S17.Rmd for statistics on chat and chunk phases in the CasualTalk dataset of 6 conversations. 
+
+# Dataset
+
+First, set working directory to SEPT17_DATA
+
+
+```{r}
+getwd()
+
+setwd("/Users/emergilmartin/Dropbox/PHD_final/CASUAL_EG_KL_JE_2016/CC_DATA_EG_KL_0616/CC_DATA_SEPT/SEPT17_DATA")
+
+getwd()
+```
+Read in data frame produced by CC_MakeDB_S17.Rmd - there are two versions: ccdf and ccdf_noTR (with transcription tiers removed). Here we use ccdf_noTR
+
+
+```{r}
+
+ccdf <- readRDS("ccdf_noTR.RDA")
+
+# check what variables are there
+
+names(ccdf)
+#summary(ccdf)
+
+```
+
+# Inter-rater Reliability Calculations
+```{r}
+
+# import data for inter-rater reliability
+irater <- read.csv("inter.txt",header=T,sep=',',stringsAsFactors = F)
+
+table(irater$text)
+irater$dur<- irater$tmax-irater$tmin
+
+tapply(irater$dur,irater$text,sum)
+PO<- (sum(irater$dur[irater$text=='AxBx'])+sum(irater$dur[irater$text=='AoBo']))/sum(irater$dur)
+PO
+
+PA<-(sum(irater$dur[irater$text %in% c('AxBx','AxBo')]))/sum(irater$dur)
+PA
+
+PB<-(sum(irater$dur[irater$text %in% c('AxBx','AoBx')]))/sum(irater$dur)
+PB
+
+PA1<-(sum(irater$dur[irater$text %in% c('AoBx','AoBo')]))/sum(irater$dur)
+PA1
+
+PB1<-(sum(irater$dur[irater$text %in% c('AxBo','AoBo')]))/sum(irater$dur)
+PB1
+
+PE<-PA*PB + PA1*PB1
+
+PE
+
+ka<-(PO-PE)/(1-PE)
+ka
+
+```
+
+## Table of variables in Dataset
+
+Variable    Type            Description
+--------   --------------   ----------------
+conv       char             Index of which conversation from A to F
+tmin       num              Start time for interval
+tier       char             Praat tier interval came from
+                            a,b,.. for speakers, overlap, phases
+label      char             Label of Praat interval:
+                            speakers: {SP}, {SL}, {LG}
+                            overlap: who is in overlap and what they are doing or {GS}
+                            phases: code for chat or chunk beginning with o or x 
+                            and with 5th character in chunk labels denoting owner of chunk
+tmax       num              end time for interval
+tierf      factor           tier factorized
+dur        num              duration of interval
+label2     char             same as label but has "x" or "o" only for phases
+dlast      num              distance from beginning of enclosing phase 
+                            result of running get_nl(phases) on each conversation 
+                            subsetted from df
+                            maybe add line to get_nl forinfo on which phenomenon it's run on
+dnext      num              distance from end of enclosing chat or chunk phase 
+t_name     char             name of enclosing chunk or chat phase
+owner      factor           generated using get_owner function from t_name - gives the owner of current phase if chunk, everyone if chat.
+chatchunk  factor           whether item is part of chat (o) or chunk (x) phase
+labelf     factor           label2 as factor
+spgen      char             gender of speaker (when tier is a speaker)
+chgen      char             gender of chunk owner
+numsp      num              how many speaking in interval from overlap tier, else 20
+numlg      num              how many laughing in interval from overlap tier, else 20
+floor      num              combination of numsp and numlg as numsp_numlg
+numspB     char             how many speaking in interval from overlap tier up to 3+, else 20
+numlgB     char             how many laughing in interval from overlap tier up to 3+, else 20
+floorB     char             combination of numspB and numlgB as numspB_numlgB
+
+
+
+## Create working database
+
+A working database, df_all, will be the basis for experiments
+```{r}
+
+# create chisp and chisp1 - to show if speaker is chunk owner, non-chunk owner, or chat speaker for each label 
+ccdf$chisp<- ccdf$tier==as.character(ccdf$owner)
+
+ccdf$chisp1<-'UNK'
+
+
+# add chisp1 for chunk owner, chat, non-chunk owner
+for (i in 1:length(ccdf$dur)) {
+    if (ccdf$chisp[i] == FALSE && ccdf$chatchunk[i]=='o')
+        {ccdf$chisp1[i] <- 'Chat Speaker'}
+    else if (ccdf$chisp[i]== FALSE && ccdf$chatchunk[i]=='x'){
+        ccdf$chisp1[i]<- 'Non-Chunk Owner'
+        
+    }
+    else if (ccdf$chisp[i]== TRUE && ccdf$chatchunk[i]=='x'){
+        ccdf$chisp1[i]<- 'Chunk Owner'
+    }
+}
+
+
+
+table(ccdf$chisp1)
+```
+
+```{r}
+# create df_all from ccdf
+
+df_all <- ccdf
+
+
+
+#create chatchunk2 with 'Chat' and 'Chunk' instead of 'o', 'x'
+
+df_all$chatchunk2<- {'unk'}
+
+for (i in 1:length(df_all$dur)){
+    if (df_all$chatchunk[i]=='o'){
+        df_all$chatchunk2[i]<- 'Chat'
+    }
+    if (df_all$chatchunk[i]=='x'){
+        df_all$chatchunk2[i]<-'Chunk'
+    }
+}
+
+table(df_all$chatchunk2)
+
+# create tiertype with overlap, phases, speak
+
+df_all$tiertype<-df_all$tier
+
+for(i in 1:length(df_all$dur)){
+    if(!(df_all$tier[i] %in% c('overlap','phases'))) {
+        df_all$tiertype[i]<-'speak'
+    }
+}
+
+table(df_all$tiertype)
+
+```
+
+# Add shnosp/shnolg
+```{r}
+
+# add shnosp - number of speakers with number of speakers 0,1,2+ for clarity in figures
+df_all$shnosp<-'UNK'
+
+summary(df_all$shnosp)
+
+table(df_all$numsp)
+
+for(i in 1:length(df_all$dur)){
+    if(df_all$numsp[i]==0){
+        df_all$shnosp[i]<-'0'
+    }else if(df_all$numsp[i]==1){
+        df_all$shnosp[i]<-'1'
+    }else if (df_all$numsp[i]==20){
+        df_all$shnosp[i]<-'unk'
+        
+    }else {
+        df_all$shnosp[i]<-'2+'
+    }
+}
+
+table(df_all$shnosp)
+
+# add shnolg - number of laughers with number of laughers 0,1,2+ for clarity in figures
+df_all$shnolg<-'UNK'
+
+summary(df_all$shnolg)
+
+table(df_all$numlg)
+
+for(i in 1:length(df_all$dur)){
+    if(df_all$numlg[i]==0){
+        df_all$shnolg[i]<-'0'
+    }else if(df_all$numlg[i]==1){
+        df_all$shnolg[i]<-'1'
+    }else if (df_all$numlg[i]==20){
+        df_all$shnolg[i]<-'unk'
+        
+    }else {
+        df_all$shnolg[i]<-'2+'
+    }
+}
+table(df_all$numlg)
+table(df_all$shnolg)
+
+#refactorize tierf to lose ghost factors
+
+df_all$tierf<-as.factor(as.character(df_all$tierf))
+table(df_all$tierf)
+
+
+```
+
+# Descriptive Statistics for Dataframe
+# Speech df
+
+Need to isolate speech tiers only, so where tier value is not 'overlap' or 'phases'
+
+```{r}
+#create speech df - only speech tiers
+
+speechdf <- df_all[!(df_all$tier %in% c('overlap','phases')),]
+
+table(speechdf$label)
+
+tapply(speechdf$dur,list(speechdf$label,speechdf$tier),sum)
+
+table(speechdf$label,speechdf$chisp1)
+
+tapply(speechdf$dur,list(speechdf$label,speechdf$chisp1),mean)
+
+# get duration vectors by role
+chat<-speechdf$dur[speechdf$chisp1=='Chat Speaker' & speechdf$label=='{SP}']
+cown<-speechdf$dur[speechdf$chisp1=='Chunk Owner' & speechdf$label=='{SP}']
+ncown<-speechdf$dur[speechdf$chisp1=='Non-Chunk Owner' & speechdf$label=='{SP}']
+summary(chat)
+summary(cown)
+summary(ncown)
+
+chatl<-speechdf$dur[speechdf$chisp1=='Chat Speaker' & speechdf$label=='{LG}']
+cownl<-speechdf$dur[speechdf$chisp1=='Chunk Owner' & speechdf$label=='{LG}']
+ncownl<-speechdf$dur[speechdf$chisp1=='Non-Chunk Owner' & speechdf$label=='{LG}']
+summary(chatl)
+summary(cownl)
+summary(ncownl)
+
+# test for significant differences
+
+wilcox.test(cown,chat,alternative = 'greater')
+wilcox.test(chat,ncown,alternative = 'greater')
+wilcox.test(cown,ncown,alternative = 'greater')
+
+boxplot(log(chat),log(cown),log(ncown),notch=TRUE,names=c('Chat','Chunk Owner','Non-Chunk Owner'))
+boxplot(log(chatl),log(cownl),log(ncownl),notch=TRUE,names=c('Chat','Chunk Owner','Non-Chunk Owner'))
+
+boxplot(chat,cown,ncown,notch=TRUE,names=c('Chat','Chunk Owner','Non-Chunk Owner'))
+
+
+wilcox.test(cownl,chatl,alternative = 'less')
+wilcox.test(chatl,ncownl)
+wilcox.test(cownl,ncownl,alternative = 'less')
+
+#xtabs(dur~label,speechdf)
+
+# sanity check with sum of durations per speaker - ok
+
+xtabs(dur~tier, speechdf)
+
+```
+
+# Speech, Silence, Laughter production per participant
+
+Calculate the amount of speech, silence and laughter produced by each participant
+
+## make barplot of total speech, silence, and laughter per conversation and per owner
+## version with bars ordered with silence on top
+```{r}
+
+# create dummy df sq1 with labels coded to {LG},{SP},{Z} for viewing purposes
+sq1<-speechdf
+sq1$labelf <- as.character(sq1$labelf)
+sq1$labelf[sq1$labelf=='{SL}']<-'{Z}'
+table(sq1$labelf)
+
+barplot(prop.table(tapply(sq1$dur, list(sq1$labelf, sq1$conv),sum),2)*100, main='SpSL per Conversation (%) - includes all silence per user so not indicative of conversational floor')
+prop.table(tapply(sq1$dur, list(sq1$labelf, sq1$conv),sum),2)*100
+
+barplot(prop.table(tapply(sq1$dur, list(sq1$labelf, sq1$tier),sum),2)*100, main='Speech, Silence, and Laughter per Participant (%)')
+prop.table(tapply(sq1$dur, list(sq1$labelf, sq1$tier),sum),2)*100
+
+# spsl per participant 
+
+barplot(prop.table(tapply(sq1$dur, list(sq1$labelf, sq1$tier),sum),2)*100, main='Speech, Silence, and Laughter per Participant (%)')
+prop.table(tapply(sq1$dur, list(sq1$labelf, sq1$tier),sum),2)*100
+
+# spsl per participant as pdf
+
+pdf('spsl2.pdf', width=8, height = 5)
+barplot(prop.table(tapply(sq1$dur, list(sq1$labelf, sq1$tier),sum),2)*100, main='Speech, Silence, and Laughter per Participant (%)')
+prop.table(tapply(sq1$dur, list(sq1$labelf, sq1$tier),sum),2)*100
+dev.off()
+
+# same for each conversation
+
+sqA<-sq1[sq1$conv=='A',]
+sqB<-sq1[sq1$conv=='B',]
+sqC<-sq1[sq1$conv=='C',]
+sqD<-sq1[sq1$conv=='D',]
+sqE<-sq1[sq1$conv=='E',]
+sqF<-sq1[sq1$conv=='F',]
+
+par(mfrow=c(3,2))
+barplot(prop.table(tapply(sqA$dur, list(sqA$label, sqA$tier),sum),2)*100, main='A')
+prop.table(tapply(sqA$dur, list(sqA$label, sqA$tier),sum),2)*100
+
+barplot(prop.table(tapply(sqB$dur, list(sqB$label, sqB$tier),sum),2)*100, main='B')
+prop.table(tapply(sqB$dur, list(sqB$label, sqB$tier),sum),2)*100
+
+barplot(prop.table(tapply(sqC$dur, list(sqC$label, sqC$tier),sum),2)*100, main='C')
+prop.table(tapply(sqC$dur, list(sqC$label, sqC$tier),sum),2)*100
+
+barplot(prop.table(tapply(sqD$dur, list(sqD$label, sqD$tier),sum),2)*100, main='D')
+prop.table(tapply(sqD$dur, list(sqD$label, sqD$tier),sum),2)*100
+
+barplot(prop.table(tapply(sqE$dur, list(sqE$label, sqE$tier),sum),2)*100, main='E')
+prop.table(tapply(sqE$dur, list(sqE$label, sqE$tier),sum),2)*100
+
+barplot(prop.table(tapply(sqF$dur, list(sqF$label, sqF$tier),sum),2)*100, main='F')
+prop.table(tapply(sqF$dur, list(sqF$label, sqF$tier),sum),2)*100
+
+par(mfrow=c(1,1))
+
+tlsz <-prop.table(tapply(sq1$dur, list(sq1$labelf, sq1$tier),sum),2)*100
+lonly<- tlsz[seq(1,length(tlsz),3)]
+lonly
+mean(lonly)
+sd(lonly)
+hist(lonly, main="Participant laughter as percentage of conversation per participant")
+
+order(prop.table(tapply(sq1$dur, list(sq1$labelf, sq1$tier),sum),2)*100)
+
+```
+#COMPRESSION STATS
+
+```{r}
+speech1<- speechdf[speechdf$label != "{SL}",]
+
+# Participant time for speech and laughter and for speech only
+
+table(speech1$label)
+
+#total partipant time for speech and laughter
+sum(speech1$dur)
+
+#total participant time for speech and laughter by chat/chunk
+tapply(speech1$dur,speech1$chatchunk,sum)
+
+#total participant time for speech only and laughter only
+tapply(speech1$dur, speech1$label,sum)
+
+#total participant time for speech only and laughter only by phase
+tapply(speech1$dur,list(speech1$label,speech1$chatchunk),sum)
+
+#total participant time for speech and laughter by conversation
+
+tapply(speech1$dur,speech1$conv,sum)
+
+#total participant time for speech and laughter by conversation by phase
+
+tapply(speech1$dur,list(speech1$conv,speech1$chatchunk),sum)
+
+#total participant time for speech only  and laughter only by conversation
+
+tapply(speech1$dur, list(speech1$label,speech1$conv),sum)
+
+#total participant time for speech only  and laughter only by conversation and by phase
+
+speech1o<-speech1[speech1$chatchunk=='o',]
+speech1x<-speech1[speech1$chatchunk=='x',]
+tapply(speech1o$dur, list(speech1o$label,speech1o$conv),sum)
+tapply(speech1x$dur, list(speech1x$label,speech1x$conv),sum)
+
+```
+
+
+
+```{r}
+# total floor duration for speech and laughter
+justo<-df_all[df_all$tiertype=='overlap',]
+
+sum(justo$dur)
+table(justo$numlg)
+
+#table(justo$label)
+
+justonos <- justo[justo$label != '{GS}',]
+
+sum(justonos$dur)
+
+#justonos <- justo[justo$label != 'GS',]
+
+sum(justonos$dur)
+names(justonos)
+
+table(justonos$numsp)
+
+table(justonos$nosp)
+
+table(justonos$numlg)
+
+table(justonos$nolg)
+
+
+
+```
+
+```{r}
+
+# total floor duration for speech and laughter by phase
+tapply(justonos$dur, justonos$chatchunk,sum)
+
+# total floor duration for speech and laughter by conversation
+tapply(justonos$dur,justonos$conv,sum)
+
+# total floor duration for speech and laughter by conversation by phase
+tapply(justonos$dur,list(justonos$conv,justonos$chatchunk),sum)
+
+# total floor duration for speech only
+sum(justonos$dur[(justonos$numsp>0) & (justonos$numsp<20)])
+sum(justonos$dur[justonos$numsp>0])
+
+# total floor duration for speech only by conversation
+jusp<-justonos[(justonos$numsp>0) & (justonos$numsp<20),]
+tapply(jusp$dur, jusp$conv,sum)
+
+# total floor duration for speech only by phase
+tapply(jusp$dur,jusp$chatchunk,sum)
+
+# total floor duration for speech only by conversation by phase
+
+tapply(jusp$dur,list(jusp$conv,jusp$chatchunk),sum)
+
+
+# total floor duration for laughter only
+sum(justonos$dur[(justonos$numlg>0) & (justonos$numlg<20)])
+sum(justonos$dur[justonos$numlg>0])
+
+# total floor duration for laughter only by conversation
+julg <- justonos[(justonos$numlg>0) & (justonos$numlg<20),]
+tapply(julg$dur, julg$conv,sum)
+
+# total floor duration for laughter only by phase
+tapply(julg$dur,julg$chatchunk,sum)
+
+# total floor duration for laughter only by conversation by phase
+
+tapply(julg$dur,list(julg$conv,julg$chatchunk),sum)
+
+# do all again for chat and chunk in new table
+# sum(justo$dur)
+# #total floor time
+# sum(justonos$dur)
+# 
+# # floor time by speech/laughter
+
+# tapply(justo$dur,list(justo$conv,justo$chatchunk),sum)
+# tapply(justo$dur,justo$conv,sum)
+# tapply(justo$dur,justo$chatchunk,sum)
+# tapply(speech1$dur,speech1$label,sum)
+# sum(speech1$dur)
+# tapply(speech1$dur,speech1$conv,sum)
+# tapply(speech1$dur, list(speech1$label, speech1$conv),sum)
+
+# speech1o<-speech1[speech1$chatchunk=='o',]
+# speech1x<-speech1[speech1$chatchunk=='x',]
+# tapply(speech1o$dur,speech1o$conv,sum)
+# tapply(speech1o$dur, list(speech1o$label, speech1o$conv),sum)
+# tapply(speech1x$dur,speech1x$conv,sum)
+# tapply(speech1x$dur, list(speech1x$label, speech1x$conv),sum)
+```
+
+# same barplots with just speech and laughter per participant
+```{r}
+# tapply to get stacked bars
+barplot(tapply(speech1$dur, list(speech1$label, speech1$conv),sum), main='Speech and Laughter Production per Conversation')
+
+# get prop.table of tapply to get proportionally stacked bars
+prop.table(tapply(speech1$dur, list(speech1$label, speech1$conv),sum),2)*100
+
+barplot(prop.table(tapply(speech1$dur, list(speech1$label, speech1$conv),sum),2)*100, main='Speech and Laughter Production per Conversation (%)')
+prop.table(tapply(speech1$dur, list(speech1$label, speech1$conv),sum),2)*100
+
+#send to pdf for thesis
+pdf('SPL_Conv2.pdf', width=8, height = 5)
+barplot(prop.table(tapply(speech1$dur, list(speech1$label, speech1$conv),sum),2)*100, main='Speech and Laughter Production per Conversation (%)')
+dev.off()
+```
+
+Barplots of speech and laughter per participant per conversation
+```{r}
+# speech and laughter per conversation per participant with convs with same no of parts side by side
+
+# define dfs for each conv and do same barplots with just speech and laughter per participant
+
+speech1A <-speech1[speech1$conv=='A',]
+speech1B <-speech1[speech1$conv=='B',]
+speech1C <-speech1[speech1$conv=='C',]
+speech1D <-speech1[speech1$conv=='D',]
+speech1E <-speech1[speech1$conv=='E',]
+speech1F <-speech1[speech1$conv=='F',]
+
+#barplot(tapply(speech1A$dur, list(speech1A$labelf,speech1A$tier),sum),beside=T)
+
+par(mfrow=c(3,2))
+
+barplot(tapply(speech1A$dur, list(speech1A$label,speech1A$tier),sum),main="A")
+
+barplot(tapply(speech1F$dur, list(speech1F$label,speech1F$tier),sum),main="F")
+
+barplot(tapply(speech1B$dur, list(speech1B$label,speech1B$tier),sum),main="B")
+
+barplot(tapply(speech1D$dur, list(speech1D$label,speech1D$tier),sum),main="D")
+
+barplot(tapply(speech1C$dur, list(speech1C$label,speech1C$tier),sum),main="C")
+
+barplot(tapply(speech1E$dur, list(speech1E$label,speech1E$tier),sum),main="E")
+
+# send to pdf
+pdf('spl_perconv2.pdf', width=8, height = 10)
+par(mfrow=c(3,2))
+
+barplot(tapply(speech1A$dur, list(speech1A$label,speech1A$tier),sum),main="A")
+
+barplot(tapply(speech1F$dur, list(speech1F$label,speech1F$tier),sum),main="F")
+
+barplot(tapply(speech1B$dur, list(speech1B$label,speech1B$tier),sum),main="B")
+
+barplot(tapply(speech1D$dur, list(speech1D$label,speech1D$tier),sum),main="D")
+
+barplot(tapply(speech1C$dur, list(speech1C$label,speech1C$tier),sum),main="C")
+
+barplot(tapply(speech1E$dur, list(speech1E$label,speech1E$tier),sum),main="E")
+dev.off()
+
+par(mfrow=c(1,1))
+
+
+```
+
+### Barplots of speech and laughter per participant
+
+```{r}
+# tapply version
+#barplot(tapply(speech1$dur, list(speech1$label, speech1$tier),sum), main='Speech and Laughter Production per Participant (%)')
+
+#table of speech and laughter totals per conversation
+
+
+
+#proportional stacked barplot
+barplot(prop.table(tapply(speech1$dur, list(speech1$label, speech1$tier),sum),2)*100, main='Speech and Laughter Production per Participant (%)')
+
+# pdf version
+pdf('spl2.pdf', width=8, height = 5)
+barplot(prop.table(tapply(speech1$dur, list(speech1$label, speech1$tier),sum),2)*100, main='Speech and Laughter Production per Participant (%)')
+dev.off()
+```
+
+# OVERLAP
+
+Create dataframe containing only labels from Praat overlap tiers in each conversation
+```{r}
+
+# make overlaps df
+
+overlaps <- df_all[df_all$tier =='overlap',]
+
+# test labels - there were a few {SL} in the overlap labels which should not have been there. Checked back with Praat and found in ABCDEF_SOC
+# Cleaned up ABCDEF_SOC to BESTENDtest.txt, which is now in MakeDB.RMD to generate corrected ccdf
+# NEED TO FIX PRAAT AT SOME STAGE
+
+# This is just a sanity test that the corrected version is being used
+
+sl<- grep(pattern='SL', x=overlaps$label)
+sl
+
+```
+
+Create new variables showing number of concurrent speakers in interval, nosp, and number of concurrent laughers, nolg, in overlaps
+
+```{r}
+overlaps$lablen <- nchar(overlaps$label)
+
+
+# labels from Praat overlap tier have either 4 characters ({GS}) and are global silence 
+# or have some multiple of 5 characters, with each 5 denoting a speaker and an activity (speech or laughter)
+# a{SP}b{LG}c{SP} would indicate a and c are speaking and b is laughing and everyone else is silent
+
+# create columns for number of speakers, nosp, and number of laughers, nolg,
+# using regmatches to create vector of number of appearances of "SP" or "LG" in labels
+
+# Number of speakers
+overlaps$nosp <- lengths(regmatches(overlaps$label,gregexpr('SP',overlaps$label)))
+
+# Number of laughers
+overlaps$nolg <- lengths(regmatches(overlaps$label,gregexpr('LG',overlaps$label)))
+```
+
+# OVERALL SPEECH DISTRIBUTION in CONVERSATION TIME
+
+This shows the proportions of silence, single speaker speech, 2 person overlap, 3 person overlap, etc., for the corpus as a whole. It should be noted that laughter has been treated as silence for this preliminary analysis.
+```{r}
+table(overlaps$nosp)
+tapply(overlaps$dur, overlaps$nosp,sum)
+tapply(overlaps$dur, overlaps$nosp,sum)*100/sum(overlaps$dur)
+barplot(tapply(overlaps$dur, overlaps$nosp,sum)*100/sum(overlaps$dur),col = c('red','yellow','blue','orange','white', 'pink'), legend=rownames(tapply(overlaps$dur, overlaps$nosp,sum)))
+
+barplot(tapply(overlaps$dur, overlaps$nosp,sum)*100/sum(overlaps$dur),col ='black', main='Distribution of floor time by number of speakers')
+
+pdf('sslo2.pdf', width=8, height = 5)
+barplot(tapply(overlaps$dur, overlaps$nosp,sum)*100/sum(overlaps$dur),col ='black', main='Distribution of floor time by number of speakers')
+dev.off()
+```
+
+From the table it can be seen that silence accounts for 23.42% of conversational time, while single party speech accounts for 68.49%. Two speaker overlap is 7.6% while three party accounts for under 0.5%. Overlap involving more than three persons is very rare in the corpus, with .02% of total conversational time taken up by 4 party overlap (21 instances), while there is only one instance of 5 party overlap in the entire corpus.
+
+
+# SPEECH DISTRIBUTION BY CONVERSATION
+
+```{r}
+
+table(overlaps$nosp,overlaps$conv)
+# There is a problem when trying to use tapply and prop.table as there were zero values for 4 and 5 on some conversations which led to NAs in tables of duration by conversation and number speaking so prop.table would not work
+# SOLUTION: do tapply and change NAs to zeros - THIINK ABOUT WHETHER THIS WOULD WORK WITH MEANS!!!
+
+# myta is a function to do the above - take df and variable (df$xxx), tapply for duration against number of speakers/laughers and conversation
+# and replace NAs with zeros. 
+# output is table which can then be prop.tabled and barplotted
+
+myta <- function(x,nowhat) {
+    mytab <- tapply(x$dur,list(nowhat,x$conv),sum)
+    mytab[is.na(mytab)]<-0
+    
+    return(mytab)
+}
+
+# Get table of total duration of speech by 0,1,2.. speakers per conversation with NAs replaced by zeros
+myt<-myta(overlaps,overlaps$nosp)
+
+myt
+
+# Now get prop.table by row in percentages
+prop.table(myt,2)*100
+barplot(prop.table(myt,2)*100, main='No.of speakers by duration per conversation %', col = c('red','yellow','blue','orange','white', 'pink'),legend=rownames(myt))
+
+#create dummy variable for graphs - to get 3 possibilities 0=2+, 1=1,2=0
+
+
+table(overlaps$shnosp)
+
+my2<-tapply(overlaps$dur,list(overlaps$shnosp,overlaps$conv),sum)
+
+barplot(prop.table(my2,2)*100, main='No.of speakers by duration per conversation %')
+
+pdf('ov_conv2.pdf', width=8, height = 5)
+barplot(prop.table(my2,2)*100, main='No.of speakers by duration per conversation %')
+dev.off()
+
+```
+
+# SPEECH And Overlap DISTRIBUTION OMITTING SILENCE
+
+```{r}
+# chat vs chunk dur overall
+tapply(overlaps$dur,overlaps$chatchunk,sum)
+prop.table(tapply(overlaps$dur,overlaps$chatchunk,sum))
+# get df of speech numbers greater than 0 - so no silence
+spnosil <- overlaps[overlaps$nosp != 0,]
+
+table(spnosil$nosp)
+
+table(spnosil$nosp, spnosil$conv)
+tapply(spnosil$dur, spnosil$nosp,sum)*100/sum(spnosil$dur)
+
+barplot(tapply(spnosil$dur, spnosil$nosp,sum)*100/sum(spnosil$dur), main='speech overlap distribution (omit silence) %', col = c('yellow','blue','orange','white', 'pink'), legend=rownames(tapply(spnosil$dur, spnosil$nosp,sum)))
+
+sp<-myta(spnosil,spnosil$nosp)
+sp
+
+prop.table(sp,2)*100
+
+barplot(prop.table(sp,2)*100, main='speech overlap distribution per conversation (omit silence) %', col = c('yellow','blue','orange','white','pink'),legend=rownames(sp))
+
+ovonly<-overlaps[overlaps$nosp >=2,]
+ovon<-myta(ovonly,ovonly$nosp)
+
+barplot(tapply(ovonly$dur, ovonly$nosp,sum)*100/sum(ovonly$dur), main='overlap distribution (omit silence) %', col = c('yellow','blue','orange','white'), legend=rownames(tapply(spnosil$dur, spnosil$nosp,sum)))
+
+barplot(tapply(ovonly$dur, ovonly$nosp,sum)*100/sum(ovonly$dur), main='Speech Overlap Distribution', col = 'black')
+
+pdf('ov1.pdf', width=8, height = 5)
+barplot(tapply(ovonly$dur, ovonly$nosp,sum)*100/sum(ovonly$dur), main='Speech Overlap Distribution', col = 'black')
+dev.off()
+
+prop.table(ovon,2)*100
+
+barplot(prop.table(ovon,2)*100, main='Overlap distribution per conversation (omit silence) %', col = c('yellow','blue','orange','white'),legend=rownames(sp))
+```
+# Sig tests for overlap and silence length in chat vs chunk
+```{r}
+
+#get dist of two-party overlap interval durations in chat vs chunk
+
+only2<-spnosil[spnosil$nosp==2,]
+table(only2$chatchunk)
+
+tapply(only2$dur,only2$chatchunk,mean)
+tapply(only2$dur,only2$chatchunk,median)
+
+only0<-overlaps[overlaps$nosp==0,]
+table(only0$chatchunk)
+
+
+tapply(only0$dur,only0$chatchunk,mean)
+tapply(only0$dur,only0$chatchunk,median)
+
+wilcox.test(only2$dur[only2$chatchunk=='x'],only2$dur[only2$chatchunk=='o'],alternative='less')
+
+wilcox.test(log(only0$dur[only0$chatchunk=='x']),log(only0$dur[only0$chatchunk=='o']))
+
+wilcox.test(only0$dur[only0$chatchunk=='x'],only0$dur[only0$chatchunk=='o'],alternative = 'greater')
+wilcox.test(only0$dur[only0$chatchunk=='o'],only0$dur[only0$chatchunk=='x'],alternative = 'greater')
+```
+#Number of speakers in chat vs chunk proportionally
+
+```{r}
+tapply(overlaps$dur,list(overlaps$numsp,overlaps$chatchunk2),sum)
+prop.table(tapply(overlaps$dur,list(overlaps$numspB,overlaps$chatchunk2),sum),2)*100
+table(overlaps$chatchunk)
+ovchat<-overlaps[overlaps$chatchunk=='o',]
+ovchunk<-overlaps[overlaps$chatchunk=='x',]
+tapply(ovchat$dur,ovchat$numspB,sum)
+prop.table(tapply(ovchat$dur,ovchat$numspB,sum))
+barplot(prop.table(tapply(ovchat$dur,ovchat$numsp,sum))*100, col='black')
+
+tapply(ovchunk$dur,ovchunk$numspB,sum)
+prop.table(tapply(ovchunk$dur,ovchunk$numspB,sum))
+barplot(prop.table(tapply(ovchunk$dur,ovchunk$numsp,sum))*100, col='black',ylim=c(0,80), xlab='Number of Speakers',ylab='Percent Floor')
+tapply(overlaps$dur,overlaps$chatchunk2,sum)
+
+par(mfrow=c(1,2))
+barplot(prop.table(tapply(ovchat$dur,ovchat$numspB,sum))*100, col='black',ylim=c(0,80), xlab='Number of Speakers',ylab='% Conversation Time', main='Chat')
+barplot(prop.table(tapply(ovchunk$dur,ovchunk$numspB,sum))*100, col='black',ylim=c(0,80), xlab='Number of Speakers',ylab='% Conversation Time', main='Chunk')
+par(mfrow=c(1,1))
+
+pdf('cho5.pdf', width=8, height = 5)
+par(mfrow=c(1,2))
+barplot(prop.table(tapply(ovchat$dur,ovchat$numspB,sum))*100, col='black',ylim=c(0,80), xlab='Number of Speakers',ylab='% Conversation Time', main='Chat')
+barplot(prop.table(tapply(ovchunk$dur,ovchunk$numspB,sum))*100, col='black',ylim=c(0,80), xlab='Number of Speakers',ylab='% Conversation Time', main='Chunk')
+par(mfrow=c(1,1))
+dev.off()
+```
+#OVERLAP VS SPEECH IN CLEAR BY GENDER
+
+```{r}
+
+# get vectors of proportion of overlapped speech to total speech by participant by gender
+
+
+fem <- c('a','e','g','k','o','p','q','t','u','x','y')
+mas <- c('b','c','d','f','h','j','l','m','n','r','s','v','w')
+
+femlab <- c('a{SP}','e{SP}','g{SP}','k{SP}','o{SP}','p{SP}','q{SP}','t{SP}','u{SP}','x{SP}','y{SP}')
+maslab <- c('b{SP}','c{SP}','d{SP}','f{SP}','h{SP}','j{SP}','l{SP}','m{SP}','n{SP}','r{SP}','s{SP}','v{SP}','w{SP}')
+
+# GET TOTAL DURATION FOR EACH LABEL FOR SPEECH IN THE CLEAR
+
+fem1<-rep(0,length(fem))
+femtot<-rep(0,length(fem))
+femprop<-rep(0,length(fem))
+
+mas1<-rep(0,length(mas))
+mastot<-rep(0,length(mas))
+masprop<-rep(0,length(mas))
+
+for(i in 1:length(fem)){
+    fem1[i]<-sum(df_all$dur[df_all$label==femlab[i]])
+    femtot[i]<-sum(df_all$dur[df_all$tier==fem[i] & df_all$label=='{SP}'])
+    femprop[i]<- (fem1[i]/femtot[i])*100
+}
+
+for(i in 1:length(mas)){
+    mas1[i]<-sum(df_all$dur[df_all$label==maslab[i]])
+    mastot[i]<-sum(df_all$dur[df_all$tier==mas[i] & df_all$label=='{SP}'])
+    masprop[i]<- (mas1[i]/mastot[i])*100
+}
+fem1
+femtot
+femprop
+masprop
+
+mean(femprop)
+mean(masprop)
+
+wilcox.test(femprop,masprop)
+sum(df_all$dur[df_all$label=='e{SP}'])
+sum(df_all$dur[df_all$tier=='e' & df_all$label=='{SP}'])
+
+```
+
+
+# LAUGHTER OVERLAP
+
+# Overlapping Laughter (disregarding speech)
+
+use overlaps to do same analysis for laughter only
+
+```{r}
+# Overlapping laughter
+
+# set oldf = overlaps
+
+oldf<-overlaps
+table(oldf$numlg,oldf$conv)
+
+prop.table(tapply(oldf$dur,oldf$numlg,sum))
+
+mytab <- tapply(oldf$dur,list(oldf$numlg,oldf$conv),sum)
+mytabtrans <- tapply(oldf$dur,list(oldf$conv,oldf$numlg),sum)
+mytab
+mytabtrans
+# There is a problem when trying to use tapply and prop.table as there were zero values for 4 and 5 on some conversations which led to NAs in tables of duration by conversation and number speaking so prop.table would not work
+# SOLUTION: do tapply and change NAs to zeros - THIINK ABOUT WHETHER THIS WOULD WORK WITH MEANS!!!
+
+# change NAs for impossible values
+mytab[is.na(mytab)]<-0
+mytab
+
+mytabtrans[is.na(mytabtrans)]<-0
+mytabtrans
+prop.table(mytabtrans,2)*100
+
+prop.table(mytab,2)*100
+barplot(prop.table(mytab,2)*100, main='No.of Laughers by duration per conversation %', col = c('red','yellow','blue','orange','white', 'pink'),legend=rownames(mytab))
+
+lgnosil <- oldf[oldf$numlg != 0,]
+
+sum(lgnosil$dur)
+
+table(lgnosil$numlg)
+#
+table(lgnosil$numlg, lgnosil$conv)
+tapply(lgnosil$dur, lgnosil$numlg,sum)
+tapply(lgnosil$dur, lgnosil$numlg,sum)*100/sum(lgnosil$dur)
+#
+barplot(tapply(lgnosil$dur, lgnosil$numlg,sum)*100/sum(lgnosil$dur), main='Laughter overlap distribution %', col = c('yellow','blue','orange','white', 'pink'), legend=rownames(tapply(lgnosil$dur, lgnosil$numlg,sum)))
+
+
+barplot(tapply(lgnosil$dur, lgnosil$numlg,sum)*100/sum(lgnosil$dur), main='Laughter overlap distribution %', col = 'black', ylim=c(0,100))
+
+
+
+
+#
+sp <- tapply(lgnosil$dur,list(lgnosil$numlg,lgnosil$conv),sum)
+sp
+sp[is.na(sp)]<-0
+sp
+#
+prop.table(sp,2)*100
+#
+barplot(prop.table(sp,2)*100, main='lg overlap distribution per conversation (omit silence) %', col = c('yellow','blue','orange','white','pink'),legend=rownames(sp))
+
+lgnosil<-lgnosil[lgnosil$numlg!=1,]
+
+sp <- tapply(lgnosil$dur,list(lgnosil$numlg,lgnosil$conv),sum)
+sp
+sp[is.na(sp)]<-0
+sp
+#
+prop.table(sp,2)*100
+#
+barplot(prop.table(sp,2)*100, main='laugh overlap distribution per conversation (omit single laugher and silence) %', col = c('yellow','blue','orange','white','pink'),legend=rownames(sp))
+
+```
+
+# laughter with/without speech
+
+To see how laughter is distributed when there is also speech and when there is not also speech
+
+Would need to look at all laughter happening when there is speech as well vs all laughter happening when numsp = 0
+
+First contrast totals, then contrast proportions by number of laughers. Maybe then look at it in terms of number of speakers
+
+```{r}
+
+
+# first sanity check - table oldf by numsp and by numlg
+
+table(oldf$numsp)
+table(oldf$numlg)
+
+# build a variable string for numb of sp then numb of lg
+
+oldf$splgseq<-'UNK'
+for (i in 1:length(oldf$dur)){
+    oldf$splgseq[i] <- paste(c(oldf$nosp[i],oldf$nolg[i]),collapse='_')
+}
+
+table(oldf$splgseq,oldf$chatchunk)
+prop.table(table(oldf$splgseq,oldf$chatchunk),2)*100
+
+tapply(oldf$dur,oldf$splgseq,sum)
+tapply(oldf$dur,oldf$splgseq,mean)
+
+tapply(oldf$dur,list(oldf$splgseq,oldf$chatchunk),sum)
+
+#sort out NA->0 for prop.table
+tasplg<-tapply(oldf$dur,list(oldf$splgseq,oldf$chatchunk),sum)
+tasplg[is.na(tasplg)]<-0
+
+prop.table(tasplg,2)*100
+tapply(oldf$dur,list(oldf$splgseq,oldf$chatchunk),mean)
+tapply(oldf$dur,list(oldf$splgseq,oldf$chatchunk),median)
+
+#LOG MEAN DUR
+tapply(log(oldf$dur),list(oldf$splgseq,oldf$chatchunk),mean)
+exp(tapply(log(oldf$dur),list(oldf$splgseq,oldf$chatchunk),mean))
+tapply(log(oldf$dur),list(oldf$splgseq,oldf$chatchunk),median)
+exp(tapply(log(oldf$dur),list(oldf$splgseq,oldf$chatchunk),median))
+
+
+#barplot(prop.table(table(xphase$bigram,xphase$timehalf),2)*100,beside=TRUE,legend= rnam)
+table(oldf$numspB)
+```
+
+
+# SAME FOR NOSP/NOLG
+```{r}
+#build a variable string for numb of sp then numb of lg up to 2+
+names(oldf)
+table(oldf$shnosp)
+table(oldf$numspB)
+table(oldf$numlgB)
+```
+
+```{r}
+oldf$splgseq2<-'UNK'
+for (i in 1:length(oldf$dur)){
+    oldf$splgseq2[i] <- paste(c(oldf$shnosp[i],oldf$shnolg[i]),collapse='_')
+}
+
+table(oldf$splgseq2,oldf$chatchunk)
+prop.table(table(oldf$splgseq2,oldf$chatchunk),2)*100
+
+tapply(oldf$dur,oldf$splgseq2,sum)
+tapply(oldf$dur,oldf$splgseq2,mean)
+
+tapply(oldf$dur,list(oldf$splgseq2,oldf$chatchunk),sum)
+
+#sort out NA->0 for prop.table
+tasplg<-tapply(oldf$dur,list(oldf$splgseq2,oldf$chatchunk),sum)
+tasplg[is.na(tasplg)]<-0
+
+prop.table(tasplg,2)*100
+tapply(oldf$dur,list(oldf$splgseq2,oldf$chatchunk),mean)
+
+```
+
+```{r}
+# subset oldf by numsp==0 and numsp!= 0
+# now subset to get laughter - numlg!=0
+lgnosil <- oldf[oldf$numlg != 0,]
+
+table(lgnosil$numlg)
+
+sum(lgnosil$dur[lgnosil$numsp ==0])
+sum(lgnosil$dur[lgnosil$numsp ==0])/sum(lgnosil$dur)
+sum(lgnosil$dur[lgnosil$numsp !=0])
+sum(lgnosil$dur[lgnosil$numsp !=0])/sum(lgnosil$dur)
+
+splg<-lgnosil[lgnosil$numsp !=0,]
+
+spl<-tapply(splg$dur, splg$numlg,sum)
+spl[is.na(spl)]<-0
+
+spl
+prop.table(spl)
+
+nosplg<-lgnosil[lgnosil$numsp ==0,]
+
+nol<-tapply(nosplg$dur, nosplg$numlg,sum)
+nol[is.na(nol)]<-0
+
+
+par(mfrow=c(1,3))
+barplot(tapply(lgnosil$dur, lgnosil$numlg,sum)*100/sum(lgnosil$dur), main='Laughter Overlap' ,xlab="Number of Laughers", ylab= '% of Laughter' ,ylim=c(0,90) ,col='black')
+barplot(prop.table(spl)*100, main='Accompanying Speech',xlab="Number of Laughers", ylab= '% of Laughter' ,ylim=c(0,90),col='black')
+barplot(prop.table(nol)*100, main='Not Accompanying Speech', xlab="Number of Laughers",ylab='% of Laughter',ylim=c(0,90),col='black')
+par(mfrow=c(1,1))
+
+pdf('lgandsp2.pdf',width=8, height = 3)
+par(mfrow=c(1,3))
+barplot(tapply(lgnosil$dur, lgnosil$numlg,sum)*100/sum(lgnosil$dur), main='Laughter Overlap' ,xlab="Number of Laughers", ylab= '% of Laughter' ,ylim=c(0,90),col='black' )
+barplot(prop.table(spl)*100, main='Accompanying Speech',xlab="Number of Laughers", ylab= '% of Laughter' ,ylim=c(0,90),col='black')
+barplot(prop.table(nol)*100, main='Not Accompanying Speech', xlab="Number of Laughers",ylab='% of Laughter',ylim=c(0,90),col='black')
+dev.off()
+par(mfrow=c(1,1))
+
+tapply(splg$dur, splg$numsp,sum)
+
+tapply(lgnosil$dur,list(lgnosil$numlg,lgnosil$numsp),sum)
+
+
+tapply(lgnosil$dur,list(lgnosil$numlg,lgnosil$numsp),sum)*100/sum(lgnosil$dur)
+
+
+#barplot(prop.table(tapply(splg$dur, splg$numsp,sum),2)*100)
+
+
+#barplot(prop.table(sp,2)*100, main='laugh overlap distribution per conversation (omit single laugher and silence) %', col = c('yellow','blue','orange','white','pink'),legend=rownames(sp))
+
+
+```
+
+#CHAT AND CHUNK
+
+# Durations of Chat and Chunk Phases
+
+
+##  Create df of only chat and chunk intervals
+The working database was subset to form a database of chat and chunk phases. There were 358 chunk and 213 chat phases in the data
+
+```{r}
+
+# create dfpall - just the chats and chunks
+
+dfpall <- df_all[df_all$tierf == 'phases',]
+
+#summary(dfpall)
+
+# Now chatchunk will tell which kind of phase each label is
+table(dfpall$chatchunk)
+# Histogram of length of chat and chunk phases – by phase
+
+hist(dfpall$dur, col='orange', main='Duration of Phases (Chat and Chank)', xlab ="Mean Durations")
+
+# table number of chunks per participant
+table(dfpall$owner)
+
+# table(mean chunk duration per participant)
+
+tapply(dfpall$dur, dfpall$owner, mean)
+mean(tapply(dfpall$dur, dfpall$owner, mean))
+exp(mean(tapply(log(dfpall$dur), dfpall$owner, mean)))
+
+chatonly <- dfpall[dfpall$chatchunk=='o',]
+chunkonly<- dfpall[dfpall$chatchunk=='x',]
+table(as.character(chunkonly$owner))
+chunkonly$owner <- as.factor(as.character(chunkonly$owner))
+tapply(chunkonly$dur,chunkonly$owner,mean)
+exp(mean(tapply(log(chunkonly$dur), chunkonly$owner, mean)))
+exp(mean(log(chunkonly$dur)))
+exp(mean(log(chatonly$dur)))
+
+
+# anova on log durations to see if there is an effect of speaker
+res.aov<-aov(log(dur)~owner,data=chunkonly)
+summary(res.aov)
+
+kruskal.test(log(dur)~owner,data=chunkonly)
+kruskal.test(dur~owner,data=chunkonly)
+kruskal.test(dur~conv,data=chunkonly)
+kruskal.test(dur~conv,data=chatonly)
+kruskal.test(dur~chatchunk,data=dfpall)
+kruskal.test(dur~owner,data=dfpall)
+kruskal.test
+kruskal.test(dur~chgen,data=chunkonly)
+
+wilcox.test(dur~chgen,data=chunkonly)
+
+plot(chatonly$dur,chatonly$tmin)
+plot(chatonly$tmin,chatonly$dur)
+chatA<-chatonly[chatonly$conv=='A',]
+summary(chatA$dur)
+summary(chatA$tmin)
+
+chatA<-chatA[chatA$dur != max(chatA$dur),]
+#chat duration against position in conversation
+par(mfrow=c(2,2))
+hist(chatonly$dur)
+hist(chatonly$tmin)
+hist(log(chatonly$dur))
+hist(log(chatonly$tmin))
+par(mfrow=c(1,1))
+res1 <-cor.test(log(chatonly$dur), chatonly$tmin,  method = "pearson")
+res1
+
+
+res2 <-cor.test(chatonly$dur, chatonly$tmin,  method = "spearman")
+res2
+
+res3 <-cor.test(chatonly$dur, chatonly$tmin,  method = "kendall")
+res3
+
+res3 <-cor.test(chunkonly$dur, chunkonly$tmin,  method = "kendall")
+res3
+#chat duration against position in conversation
+par(mfrow=c(2,2))
+hist(chatA$dur)
+hist(chatA$tmin)
+hist(log(chatA$dur))
+hist(log(chatA$tmin))
+par(mfrow=c(1,1))
+res1 <-cor.test(log(chatA$dur), chatA$tmin,  method = "pearson")
+res1
+
+
+res2 <-cor.test(chatA$dur, chatA$tmin,  method = "spearman")
+res2
+
+res3 <-cor.test(chatA$dur, chatA$tmin,  method = "kendall")
+res3
+```
+
+# Check for outliers
+
+The distribution of phase lengths is right skewed, as a consequence of the hard left boundary on the data - all phases are greater than zero in length. The histogram also revealed the presence of some apparently extreme values in the right tail of the distribution. 
+
+As a rule of thumb, values greater than 1.5*IQR above 3rd or below 1st quartile can be considered outliers. 
+This distribution is very skewed (right) so it was decided to find outliers using this rule of thumb 
+on log-transformed duration data which is closer to normal.
+
+
+
+# Find untransformed and log outliers on dfpall
+```{r}
+
+dfpall$logdur <- log(dfpall$dur)
+
+par(mfrow = c(1,2))
+boxplot(dur~chatchunk, data =dfpall, main="Bout Duration by Phase Type", xlab = "Phase Type", ylab = "Duration", col=c("blue","green"), notch = TRUE)
+
+boxplot(logdur~chatchunk, data =dfpall, main="Log of Bout Duration by Phase Type", xlab = "Phase Type", ylab = "Log of Duration", col=c("cyan","seagreen"), notch = TRUE)
+
+par(mfrow= c(1,1))
+
+par(mfrow = c(1,2))
+boxplot(dur~chatchunk, data =dfpall, xlab = "Phase Type", ylab = "Duration", col=c("black","grey"), notch = TRUE)
+
+boxplot(logdur~chatchunk, data =dfpall, xlab = "Phase Type", ylab = "Log of Duration", col=c("black","grey"), notch = TRUE)
+
+par(mfrow= c(1,1))
+```
+
+On inspection, the boxplot for the log trasformed durations is more evenly distributed and has far fewer outliers than the raw data. Only one outlier (the maximum value of chunk duration) appears on the boxplots for the log transformed data.
+
+In order to find any outliers in the transformed data using the rule of thumb, the log duration data was subset by phase type, resulting in vectors of chunk log duration and chat log duration. The threshold value for outliers - the value of the 3rd quartile plus 1.5 times the interquartile range - was computed for both and any values in excess of these thresholds were identified. The calculations resulted in one value only - the highest log duration in the chunk subset, corresponding to 287.5485 seconds when transformed back. The outlier value was found to correspond to a chunk in conversaton C. The data were examined manually and ...
+
+
+```{r}
+allchat <- dfpall$logdur[dfpall$chatchunk=='o']
+
+IQR(allchat)
+
+quantile(allchat,.75)
+
+quantile(allchat,.75) + 1.5*(IQR(allchat))
+max(allchat)
+
+
+allchunk <- dfpall$logdur[dfpall$chatchunk=='x']
+
+IQR(allchunk)
+quantile(allchunk,.75)
+quantile(allchunk,.75) + 1.5*(IQR(allchunk))
+
+max(allchunk)
+log(287)
+
+outchat <- allchat[allchat>= (quantile(allchat,.75) + 1.5*(IQR(allchat)))]
+outchat
+
+outchunk <- allchunk[allchunk>= (quantile(allchunk,.75) +1.5*(IQR(allchunk)))]
+outchunk
+```
+
+# Test normality of chat and chunk phase length distributions using qqplot
+
+A new dataset dfp was generated by ommiting the row containing the outlier value from the dataset.
+
+
+```{r}
+
+# remove longest phase as it's an outlier to generate dfp - working df
+max(dfpall$dur)
+
+# where is this value
+
+dfpall[dfpall$dur == max(dfpall$dur),]
+
+# remove
+dfp <- dfpall[-which.max(dfpall$dur),]
+
+#barplot chat vs chunk per conversation
+
+tapply(dfp$dur, dfp$chatchunk ,sum)
+prop.table(tapply(dfp$dur, dfp$chatchunk ,sum))*100
+
+barplot(prop.table(tapply(dfp$dur, list(dfp$chatchunk, dfp$conv),sum),2)*100, main='Chat vs Chunk by Duration per Conversation (%)',col = c('gray40','gray80'))
+
+par(mfrow=c(1,2))
+barplot(as.matrix(prop.table(tapply(dfp$dur, dfp$chatchunk ,sum))*100),beside=FALSE)
+
+#barplot(prop.table(tapply(dfp$dur, dfp$chatchunk ,sum),2)*100, main='Chat vs Chunk by Duration (%)',col = c('gray40','gray80'))
+
+#this is chat vs chunk by % duration per conversation
+barplot(prop.table(tapply(dfp$dur, list(dfp$chatchunk, dfp$conv),sum),2)*100,col = c('gray40','gray80'))
+
+par(mfrow=c(1,1))
+
+pdf('chatchunkdur.pdf', width=8, height = 5)
+par(mfrow=c(1,2))
+barplot(as.matrix(prop.table(tapply(dfp$dur, dfp$chatchunk ,sum))*100),beside=FALSE,col = c('gray40','gray80'))
+
+#this is chat vs chunk by % duration per conversation
+barplot(prop.table(tapply(dfp$dur, list(dfp$chatchunk, dfp$conv),sum),2)*100,col = c('gray40','gray80'))
+par(mfrow=c(1,1))
+dev.off()
+
+
+# boxplot chat and chunk using dfp
+par(mfrow=c(1,2))
+boxplot(dur~chatchunk, data =dfp, main="Bout Duration by Phase Type", xlab = "Phase Type", ylab = "Duration", col=c("blue","green"), notch = TRUE)
+boxplot(logdur~chatchunk, data =dfp, main="Bout LOG Duration by Phase Type", xlab = "Phase Type", ylab = "Duration", col=c("cyan","seagreen"), notch = TRUE)
+par(mfrow=c(1,1))
+
+par(mfrow=c(1,2))
+boxplot(dur~chatchunk, data =dfp, main="Phase Duration", xlab = "Phase Type", ylab = "Duration", col=c("gray40","gray80"), notch = TRUE,names=c('Chat','Chunk'))
+boxplot(logdur~chatchunk, data =dfp, main="Phase Log Duration", xlab = "Phase Type", ylab = "Duration", col=c("gray40","gray80"), notch = TRUE,names=c('Chat','Chunk'))
+
+pdf('chdbox2.pdf', width=8, height = 5)
+par(mfrow=c(1,2))
+boxplot(dur~chatchunk, data =dfp, main="Phase Duration", xlab = "Phase Type", ylab = "Duration", col=c("gray40","gray80"), notch = TRUE,names=c('Chat','Chunk'))
+boxplot(logdur~chatchunk, data =dfp, main="Phase Log Duration", xlab = "Phase Type", ylab = "Duration", col=c("gray40","gray80"), notch = TRUE,names=c('Chat','Chunk'))
+dev.off()
+
+par(mfrow=c(4,1))
+chatonly <- dfp[dfp$chatchunk=='o',]
+chunkonly<- dfp[dfp$chatchunk=='x',]
+summary(chatonly)
+summary(chunkonly)
+
+boxplot(dur~conv, data = chatonly, main="Chat  Duration by Conversation", xlab = "Conversation", ylab = "Duration", col=c("blue"), notch = TRUE)
+boxplot(dur~conv, data = chunkonly, main="Chunk  Duration by Conversation", xlab = "Conversation", ylab = "Duration", col=c("green"), notch = TRUE)
+
+
+boxplot(logdur~conv, data = chatonly, main="Chat Log Duration by Conversation", xlab = "Conversation", ylab = "Log Duration", col=c("cyan"), notch = TRUE)
+boxplot(logdur~conv, data = chunkonly, main="Chunk Log Duration by Conversation", xlab = "Conversation", ylab = " Log Duration", col=c("seagreen"), notch = TRUE)
+
+pdf('durationsbyconv.pdf', width=8, height = 10)
+par(mfrow=c(4,1))
+chatonly <- dfp[dfp$chatchunk=='o',]
+chunkonly<- dfp[dfp$chatchunk=='x',]
+#summary(chatonly)
+#summary(chunkonly)
+
+boxplot(dur~conv, data = chatonly, main="Chat  Duration by Conversation", xlab = "Conversation", ylab = "Duration", col=c("gray40"), notch = TRUE)
+boxplot(dur~conv, data = chunkonly, main="Chunk  Duration by Conversation", xlab = "Conversation", ylab = "Duration", col=c("gray80"), notch = TRUE)
+
+
+boxplot(logdur~conv, data = chatonly, main="Chat Log Duration by Conversation", xlab = "Conversation", ylab = "Log Duration", col=c("gray40"), notch = TRUE)
+boxplot(logdur~conv, data = chunkonly, main="Chunk Log Duration by Conversation", xlab = "Conversation", ylab = " Log Duration", col=c("gray80"), notch = TRUE)
+dev.off()
+par(mfrow=c(1,1))
+
+# boxplot chunk dur (log) by speaker
+boxplot(logdur~owner, data = chunkonly, main="Chunk Log Duration by Spearker", xlab = "Speaker", ylab = "Duration", col=c("seagreen"), notch = TRUE)
+
+# do again by speaker (real - grouped into actual speakers)
+
+# chunks per speaker
+
+table(chunkonly$owner)
+
+# chunks by gender
+
+table(chunkonly$chgen)
+
+# chunk log duration by gender
+par(mfrow=c(1,1))
+boxplot(logdur~chgen, data = chunkonly, main="Chunk Log Duration by Gender", xlab = "Gender", ylab = "Duration", col='gray80', notch = TRUE)
+
+# per gender per speaker
+
+boxplot(logdur~owner, data = chunkonly[chunkonly$chgen=='f',], main="Female Chunk Log Duration by Speaker", xlab = "Speaker", ylab = "Duration", col='gray80', notch = TRUE)
+
+boxplot(logdur~owner, data = chunkonly[chunkonly$chgen=='m',], main="Male Chunk Log Duration by Speaker", xlab = "Speaker", ylab = "Duration", col=c("seagreen"), notch = TRUE)
+
+
+
+
+
+# hist and qq plots for all, chat, and chunk
+par(mfrow=c(2,3))
+hist(dfp$dur,ylim=c(0,250), col='orange')
+abline(v=mean(dfp$dur),col = "red")
+abline(v=median(dfp$dur),col = "blue")
+hist(dfp$dur[dfp$chatchunk=='o'],ylim=c(0,250), col='blue')
+abline(v=mean(dfp$dur[dfp$chatchunk=='o']),col = "red")
+abline(v=median(dfp$dur[dfp$chatchunk=='o']),col = "blue")
+hist(dfp$dur[dfp$chatchunk=='x'],ylim=c(0,250), col='green')
+abline(v=mean(dfp$dur[dfp$chatchunk=='x']),col = "red")
+abline(v=median(dfp$dur[dfp$chatchunk=='x']),col = "blue")
+
+qqnorm(dfp$dur)
+qqline(dfp$dur)
+
+qqnorm(dfp$dur[dfp$chatchunk=='o'])
+qqline(dfp$dur[dfp$chatchunk=='o'])
+
+qqnorm(dfp$dur[dfp$chatchunk=='x'])
+qqline(dfp$dur[dfp$chatchunk=='x'])
+
+par(mfrow=c(1,1))
+
+# mean and median of chat
+mean(dfp$dur[dfp$chatchunk=='o'])
+median(dfp$dur[dfp$chatchunk=='o'])
+
+# mean and median of chunk
+mean(dfp$dur[dfp$chatchunk=='x'])
+median(dfp$dur[dfp$chatchunk=='x'])
+
+
+```
+
+
+
+# plot chat and chunk together on same axes
+# Look at differences in variance
+```{r}
+
+p1 <- hist(dfp$dur[dfp$chatchunk=='o'],plot=FALSE)
+p2 <- hist(dfp$dur[dfp$chatchunk=='x'],plot=FALSE)
+plot(0,0,type="n",xlim=c(0,200),ylim=c(0,200),xlab="chatchunk",ylab="freq",main="Two histograms")
+plot(p1,col="blue",density=10,angle=135,add=TRUE)
+plot(p2,col="green",density=10,angle=45,add=TRUE)
+
+
+# look at variances
+var(dfp$dur[dfp$chatchunk=='o'])
+var(dfp$dur[dfp$chatchunk=='x'])
+```
+
+## Mann-Whitney U/Wilcoxon Rank Sum test for significant difference between length of chat and chunk phases
+
+As the distributions for phase lengths are very right skewed and do not approximate the normal distribution sufficiently to warrant the use of parametric statistics, the non-parametric Mann-Whitney Wilcoxon test was applied to investigate whether there is significant difference between the distributions of length for chat and chunk phases.
+
+```{r}
+#summary(dfp)
+
+# run on dfp - without outlier
+wilcox.test(dur~chatchunk, data = dfp)
+
+# run on dfpall - including outlier
+wilcox.test(dur~chatchunk, data = dfpall)
+
+
+```
+
+
+## Log of duration plots
+
+```{r}
+
+dfp$logdur <- log(dfp$dur)
+
+#test that all values greater than 1 to avoid negative logs
+min(dfp$logdur)
+
+
+
+par(mfrow=c(2,3))
+hist(dfp$logdur,ylim=c(0,180),col='gold')
+abline(v=mean(dfp$logdur),col = "red")
+abline(v=median(dfp$logdur),col = "blue")
+
+hist(dfp$logdur[dfp$chatchunk=='o'],ylim=c(0,180),col='cyan')
+abline(v=mean(dfp$logdur[dfp$chatchunk=='o']),col = "red")
+abline(v=median(dfp$logdur[dfp$chatchunk=='o']),col = "blue")
+
+hist(dfp$logdur[dfp$chatchunk=='x'],ylim=c(0,180),col='seagreen')
+abline(v=mean(dfp$logdur[dfp$chatchunk=='x']),col = "red")
+abline(v=median(dfp$logdur[dfp$chatchunk=='x']),col = "blue")
+
+qqnorm(dfp$logdur)
+qqline(dfp$logdur)
+qqnorm(dfp$logdur[dfp$chatchunk=='o'])
+qqline(dfp$logdur[dfp$chatchunk=='o'])
+qqnorm(dfp$logdur[dfp$chatchunk=='x'])
+qqline(dfp$logdur[dfp$chatchunk=='x'])
+
+par(mfrow=c(1,1))
+
+# send plot to file
+png(filename="qq.png")
+par(mfrow=c(2,3))
+hist(dfp$logdur,ylim=c(0,180),col='gold')
+abline(v=mean(dfp$logdur),col = "red")
+abline(v=median(dfp$logdur),col = "blue")
+
+hist(dfp$logdur[dfp$chatchunk=='o'],ylim=c(0,180),col='cyan')
+abline(v=mean(dfp$logdur[dfp$chatchunk=='o']),col = "red")
+abline(v=median(dfp$logdur[dfp$chatchunk=='o']),col = "blue")
+
+hist(dfp$logdur[dfp$chatchunk=='x'],ylim=c(0,180),col='seagreen')
+abline(v=mean(dfp$logdur[dfp$chatchunk=='x']),col = "red")
+abline(v=median(dfp$logdur[dfp$chatchunk=='x']),col = "blue")
+
+qqnorm(dfp$logdur)
+qqline(dfp$logdur)
+qqnorm(dfp$logdur[dfp$chatchunk=='o'])
+qqline(dfp$logdur[dfp$chatchunk=='o'])
+qqnorm(dfp$logdur[dfp$chatchunk=='x'])
+qqline(dfp$logdur[dfp$chatchunk=='x'])
+
+par(mfrow=c(1,1))
+
+dev.off()
+
+# look at mean,median, variances
+# means
+mean(dfp$logdur[dfp$chatchunk=='o'])
+mean(dfp$logdur[dfp$chatchunk=='x'])
+
+# get antilogs
+exp(mean(dfp$logdur[dfp$chatchunk=='o']))
+exp(mean(dfp$logdur[dfp$chatchunk=='x']))
+
+# means of original durations
+mean(dfp$dur[dfp$chatchunk=='o'])
+mean(dfp$dur[dfp$chatchunk=='x'])
+
+# medians
+median(dfp$logdur[dfp$chatchunk=='o'])
+median(dfp$logdur[dfp$chatchunk=='x'])
+
+# variances
+var(dfp$logdur[dfp$chatchunk=='o'])
+var(dfp$logdur[dfp$chatchunk=='x'])
+
+# standard deviation
+
+sd(dfp$logdur[dfp$chatchunk=='o'])
+exp(sd(dfp$logdur[dfp$chatchunk=='o']))
+
+sd(dfp$logdur[dfp$chatchunk=='x'])
+exp(sd(dfp$logdur[dfp$chatchunk=='x']))
+
+# ftest
+
+myvartest<-var.test(dfp$logdur[dfp$chatchunk=='x'],dfp$logdur[dfp$chatchunk=='o'], alternative='two.sided')
+myvartest
+
+# 95% Confidence interval for chunk mean duration
+
+chmean <- mean(dfp$logdur[dfp$chatchunk=='x'])
+chsd <- sd(dfp$logdur[dfp$chatchunk=='x'])
+chn <- length(dfp$logdur[dfp$chatchunk=='x'])
+
+error <- qnorm(0.975)*chsd/sqrt(chn)
+
+left <- chmean-error
+right <- chmean+error
+
+left
+right
+
+chmean
+
+# get antilogs to see real numbers
+
+exp(left)
+exp(right)
+exp(chmean)
+
+
+# 99% CI
+error <- qnorm(0.995)*chsd/sqrt(chn)
+
+left <- chmean-error
+right <- chmean+error
+
+left
+right
+
+chmean
+# get antilogs to see real numbers
+
+exp(left)
+exp(right)
+exp(chmean)
+
+# 95% Confidence interval for CHAT mean duration
+
+chamean <- mean(dfp$logdur[dfp$chatchunk=='o'])
+chasd <- sd(dfp$logdur[dfp$chatchunk=='o'])
+chan <- length(dfp$logdur[dfp$chatchunk=='o'])
+
+error <- qnorm(0.975)*chasd/sqrt(chan)
+
+left <- chamean-error
+right <- chamean+error
+
+left
+right
+
+chamean
+
+# get antilogs to see real numbers
+
+exp(left)
+exp(right)
+exp(chamean)
+
+
+# 99% CI
+error <- qnorm(0.995)*chasd/sqrt(chan)
+
+left <- chamean-error
+right <- chamean+error
+
+left
+right
+
+chamean
+# get antilogs to see real numbers
+
+exp(left)
+exp(right)
+exp(chamean)
+
+```
+
+## Contrast Untransformed and Log-transformed data for normality, kurtosis
+
+Skew a measure of how 'balanced' a distribution is, and is calculated as the thrid moment of the mean divided by the cube of standard deviation. The degree of skew in the original and log transformed duration data for chat and chunk segments was estimated by creating a function in R as described in Crawley (p84).
+
+The skew values thus obtained were tested to see if they were significantly different from zero (the skew value of the normal distribution). Each skew value was divided by its standard error and the probability of getting this value by chance given the degrees of freedom (in this case n -2 as mean and variance have already been estimated thsu using up two dofs)
+
+Skew rules of thumb - over 1 - heavily skewed, .5 to 1 moderate skew, 0-.5 approx normal (all for neg or pos values)
+
+```{r}
+# check skew
+
+# skew function
+
+skew <- function(x) {
+    m3 <- sum((x - mean(x))^3/length(x))
+    s3 <- sqrt(var(x))^3
+    m3/s3
+}
+
+# skew probability 
+
+skewp <- function(x) {
+    1 - pt((skew(x)/sqrt(6/length(x))),length(x)-2)
+}
+
+# chat raw and log
+skew(dfp$dur[dfp$chatchunk=='o'])
+skewp(dfp$dur[dfp$chatchunk=='o'])
+shapiro.test(dfp$dur[dfp$chatchunk=='o'])
+skewness(dfp$dur[dfp$chatchunk=='o'])
+kurtosis(dfp$dur[dfp$chatchunk=='o'])
+
+skew(dfp$logdur[dfp$chatchunk=='o'])
+skewp(dfp$logdur[dfp$chatchunk=='o'])
+shapiro.test(dfp$logdur[dfp$chatchunk=='o'])
+skewness(dfp$logdur[dfp$chatchunk=='o'])
+kurtosis(dfp$logdur[dfp$chatchunk=='o'])
+
+# chunk raw and log
+skew(dfp$dur[dfp$chatchunk=='x'])
+skewp(dfp$dur[dfp$chatchunk=='x'])
+shapiro.test(dfp$dur[dfp$chatchunk=='x'])
+skewness(dfp$dur[dfp$chatchunk=='x'])
+kurtosis(dfp$dur[dfp$chatchunk=='x'])
+
+
+skew(dfp$logdur[dfp$chatchunk=='x'])
+skewp(dfp$logdur[dfp$chatchunk=='x'])
+shapiro.test(dfp$logdur[dfp$chatchunk=='x'])
+skewness(dfp$logdur[dfp$chatchunk=='x'])
+kurtosis(dfp$logdur[dfp$chatchunk=='x'])
+
+# check kurtosis
+```
+
+
+
+## T Test on Log Transformed Data ###
+
+```{r}
+t.test(logdur~chatchunk, data = dfp)
+```
+
+
+Plot overlapping histograms for chat and chunk on same graph 
+```{r}
+p1 <- hist(dfp$logdur[dfp$chatchunk=='o'],plot=FALSE)
+p2 <- hist(dfp$logdur[dfp$chatchunk=='x'],plot=FALSE)
+plot(0,0,type="n",xlim=c(0,10),ylim=c(0,200),xlab="chatchunk",ylab="freq",main="Two histograms")
+plot(p1,col="cyan",density=10,angle=135,add=TRUE)
+plot(p2,col="seagreen",density=10,angle=45,add=TRUE)
+```
+
+
+## Diversion due to worry about comparing distributions of different sample sizes
+
+```{r}
+# ratio of sample sizes 
+table(dfp$chatchunk)
+
+ccratio <- length(dfp$chatchunk[dfp$chatchunk=='x']) / length(dfp$chatchunk[dfp$chatchunk=='o'])
+ccratio
+
+# concatenate a vector containing 144 randomly selected elements from chat dfp$dur vector distribution to original chat  dfp$dur vector and look at difference in distribution
+
+# name chat and chunk length vectors
+
+chatlen <- dfp$dur[dfp$chatchunk=='o']
+logchatlen <- dfp$logdur[dfp$chatchunk=='o']
+
+chunklen <- dfp$dur[dfp$chatchunk=='x']
+logchunklen <- dfp$logdur[dfp$chatchunk=='x']
+
+# create vector of additional values for chat length - sample with replacement 144 from chatlen
+
+morechatlen <- sample(chatlen,144,replace=T)
+
+chatlen2 <- c(chatlen,morechatlen)
+summary(chatlen2)
+
+# histograms for chunklen, chatlen, chatlen2
+
+par(mfrow=c(2,3))
+hist(chunklen,ylim=c(0,200))
+abline(v=mean(chunklen),col = "red")
+abline(v=median(chunklen),col = "blue")
+hist(chatlen,ylim=c(0,200))
+abline(v=mean(chatlen),col = "red")
+abline(v=median(chatlen),col = "blue")
+hist(chatlen2,ylim=c(0,200))
+abline(v=mean(chatlen2),col = "red")
+abline(v=median(chatlen2),col = "blue")
+
+# now do same with logs
+hist(log(chunklen),ylim=c(0,200))
+abline(v=mean(log(chunklen)),col = "red")
+abline(v=median(log(chunklen)),col = "blue")
+hist(log(chatlen),ylim=c(0,200))
+abline(v=mean(log(chatlen)),col = "red")
+abline(v=median(log(chatlen)),col = "blue")
+hist(log(chatlen2),ylim=c(0,200))
+abline(v=mean(log(chatlen2)),col = "red")
+abline(v=median(log(chatlen2)),col = "blue")
+
+
+par(mfrow=c(1,1))
+
+# look at variances
+
+var(log(chunklen))
+var(log(chatlen))
+var(log(chatlen2))
+
+
+```
+
+
+Length of chat and chunk phases – by conversation - SEEMS TO BE A WASH
+
+```{r}
+par(mfrow=c(3,2))
+hist(dfp$dur[dfp$chatchunk=='o' & dfp$conv=="A"])
+hist(dfp$dur[dfp$chatchunk=='o' & dfp$conv=="B"])
+hist(dfp$dur[dfp$chatchunk=='o' & dfp$conv=="C"])
+hist(dfp$dur[dfp$chatchunk=='x' & dfp$conv=="A"])
+hist(dfp$dur[dfp$chatchunk=='x' & dfp$conv=="B"])
+hist(dfp$dur[dfp$chatchunk=='x' & dfp$conv=="C"])
+
+par(mfrow=c(3,2))
+hist(dfp$dur[dfp$chatchunk=='o' & dfp$conv=="D"])
+hist(dfp$dur[dfp$chatchunk=='o' & dfp$conv=="E"])
+hist(dfp$dur[dfp$chatchunk=='o' & dfp$conv=="F"])
+hist(dfp$dur[dfp$chatchunk=='x' & dfp$conv=="D"])
+hist(dfp$dur[dfp$chatchunk=='x' & dfp$conv=="E"])
+hist(dfp$dur[dfp$chatchunk=='x' & dfp$conv=="F"])
+
+```
+
+# GENDER
+
+```{r}
+# Number of chunks by gender
+chunks <- dfp[dfp$chatchunk=='x',] 
+
+table(dfp$chgen)
+```
+
+
+
+
+# speech and Laughter as Proportion of chat and chunk output
+
+
+
+
+```{r}
+# create variable propdur
+
+summary(speech1)
+speech1$labelf<-as.factor(as.character(speech1$labelf))
+table(speech1$labelf)
+table(speech1$label)
+
+speech1$propdur <- speech1$dur/sum(speech1$dur)
+sum(speech1$propdur)
+
+barplot(tapply(speech1$propdur, list(speech1$labelf,speech1$chatchunk),sum),beside=T)
+# 
+barplot(prop.table(tapply(speech1$propdur, list(speech1$labelf,speech1$chatchunk),sum),2)*100, main='SPL by Chat and chunk')
+
+#barplot(prop.table(tapply(speech1$dur, list(speech1$labelf, speech1$tier),sum),2)*100, main='SpL per Participant (%)')
+
+```
+
+Actually, what I want is to see laughter in chat as proportion of total speech and laughter in chat, and ditto for chunk. I will need to subset each and produce barcharts for each side by side on same axes
+
+```{r}
+# create subsets for chat o and chunk x
+ospeech <- speech1[speech1$chatchunk =='o',]
+#summary(ospeech)
+
+xspeech <- speech1[speech1$chatchunk =='x',]
+#summary(xspeech)
+
+# change variable propdur in both to be proportion of local total rather than speech1 total
+ospeech$propdur <- ospeech$dur/sum(ospeech$dur)
+xspeech$propdur <- xspeech$dur/sum(xspeech$dur)
+
+
+barplot(tapply(ospeech$propdur, list(ospeech$labelf),sum),beside=T)
+barplot(tapply(xspeech$propdur, list(xspeech$labelf),sum),beside=T)
+
+# Look at these per conversation
+barplot(tapply(ospeech$propdur, list(ospeech$labelf, ospeech$conv),sum),beside=T)
+barplot(tapply(xspeech$propdur, list(xspeech$labelf, xspeech$conv),sum),beside=T)
+
+# see what tapply does on its own
+
+barplot(tapply(ospeech$propdur, list(ospeech$labelf),sum),beside=T)
+tapply(xspeech$propdur, list(xspeech$labelf),sum)
+
+tapply(xspeech$propdur, list(xspeech$labelf, xspeech$conv),sum)
+sum(tapply(xspeech$propdur, list(xspeech$labelf, xspeech$conv),sum))
+tapply(xspeech$dur, list(xspeech$labelf, xspeech$conv),sum)
+prop.table(tapply(xspeech$propdur, list(xspeech$labelf, xspeech$conv),sum),2)
+barplot(prop.table(tapply(xspeech$propdur, list(xspeech$labelf, xspeech$conv),sum),2)*100)
+barplot(prop.table(tapply(ospeech$propdur, list(ospeech$labelf, ospeech$conv),sum),2))
+```
+
+```{r}
+# speech and laughter overall, chat, chunk
+
+par(mfrow=c(1,3))
+
+barplot(prop.table(tapply(speech1$propdur, list(speech1$labelf,speech1$chatchunk),sum),2)*100, names=c('Chat','Chunk'))
+
+barplot(prop.table(tapply(ospeech$propdur, list(ospeech$labelf, ospeech$conv),sum),2)*100)
+
+barplot(prop.table(tapply(xspeech$propdur, list(xspeech$labelf, xspeech$conv),sum),2)*100)
+
+par(mfrow=c(1,1))
+
+pdf('SPLXO.pdf',width=8, height = 3)
+par(mfrow=c(1,3))
+barplot(prop.table(tapply(speech1$propdur, list(speech1$labelf,speech1$chatchunk),sum),2)*100, names=c('Chat','Chunk'))
+
+barplot(prop.table(tapply(ospeech$propdur, list(ospeech$labelf, ospeech$conv),sum),2)*100)
+
+barplot(prop.table(tapply(xspeech$propdur, list(xspeech$labelf, xspeech$conv),sum),2)*100)
+
+par(mfrow=c(1,1))
+dev.off()
+
+# library("ggplot2")
+# g <- ggplot(xspeech$dur,aes(xspeech$labelf))
+# g+geom_bar()
+
+# Not right - need to get local propdur - duration over sum of labels for conversation and plot agains labels in this conversation only - TRY ggplot???
+
+#speech1$propdur <- speech1$dur/sum(speech1$dur)
+sum(ospeech$propdur)
+sum(xspeech$propdur)
+
+# speech and laughter proportions per chunk/chat
+
+# work on df_all as will need both speech and chat/chunks
+
+#summary(df_all)
+#table(df_all$tier)
+
+
+#df_all$t_name[c(20,500,15000)]
+
+
+
+df_all$ltot<-{NA}
+summary(df_all$ltot)
+
+df_all$stot<-{NA}
+summary(df_all$stot)
+
+df_all$sltot<-{NA}
+summary(df_all$sltot)
+
+df_all$sprop<-{NA}
+df_all$lprop<-{NA}
+
+nedf<-df_all[df_all$tiertype=='phases',]
+#table(df_all$t_name)
+
+table(df_all$label[df_all$t_name==df_all$t_name[2]])
+sum(df_all$dur[df_all$t_name==df_all$t_name[2]])
+
+for(i in 1:length(df_all$dur)) {
+    if (df_all$tiertype[i]=='phases'){
+        t_name<-df_all$t_name[i]
+
+        df_ph<-df_all[(df_all$t_name==t_name) & (df_all$tiertype=='speak'),]
+
+        df_all$ltot[i]<-sum(df_ph$dur[df_ph$label=='{LG}'])
+        df_all$ltot[i]<-sum(df_ph$dur[as.character(df_ph$labelf)=='{LG}'])
+        df_all$stot[i]<-sum(df_ph$label=='{SP}')
+        df_all$sltot[i]<-sum(df_all$ltot[i],df_all$stot[i])
+        df_all$lprop[i]=df_all$ltot[i]/df_all$sltot[i]
+        df_all$sprop[i]=df_all$stot[i]/df_all$sltot[i]
+        
+    
+        
+    }
+}
+
+phonly<-df_all[df_all$tiertype=='phases',]
+
+#summary(phonly)
+
+
+
+par(mfrow=c(1,3))
+hist(phonly$sprop)
+hist(phonly$sprop[phonly$chatchunk=='o'])
+
+hist(phonly$sprop[phonly$chatchunk=='x'])
+
+par(mfrow=c(1,1))
+
+par(mfrow=c(1,3))
+hist(phonly$lprop)
+hist(phonly$lprop[phonly$chatchunk=='o'])
+
+hist(phonly$lprop[phonly$chatchunk=='x'])
+
+par(mfrow=c(1,1))
+
+summary(phonly$sprop)
+summary(phonly$sprop[phonly$chatchunk=='o'])
+
+summary(phonly$sprop[phonly$chatchunk=='x'])
+
+summary(phonly$lprop)
+summary(phonly$lprop[phonly$chatchunk=='o'])
+
+summary(phonly$lprop[phonly$chatchunk=='x'])
+
+wilcox.test(sprop~chatchunk, data = phonly)
+wilcox.test(lprop~chatchunk, data = phonly)
+wilcox.test(lprop~chatchunk, data = phonly, alternative='greater')
+kruskal.test(lprop~chatchunk, data = phonly)
+
+# is laughter more common in chat
+wilcox.test(lprop~chatchunk, data = phonly, alternative='less')
+
+
+
+boxplot(lprop*100 ~ chatchunk, data=phonly,notch=TRUE)
+
+# remove outlying chunk value for ltot and do again
+
+# remove
+phonly <- phonly[-which.max(phonly$lprop),]
+
+wilcox.test(sprop~chatchunk, data = phonly)
+wilcox.test(lprop~chatchunk, data = phonly)
+wilcox.test(lprop~chatchunk, data = phonly, alternative='greater')
+kruskal.test(lprop~chatchunk, data = phonly)
+
+boxplot(lprop*100 ~ chatchunk, data=phonly,notch=TRUE)
+
+# remove next outlying ltot value
+
+phonly <- phonly[-which.max(phonly$lprop),]
+
+wilcox.test(sprop~chatchunk, data = phonly)
+wilcox.test(lprop~chatchunk, data = phonly)
+kruskal.test(lprop~chatchunk, data = phonly)
+
+summary(phonly$lprop)
+summary(phonly$lprop[phonly$chatchunk=='o'])
+
+summary(phonly$lprop[phonly$chatchunk=='x'])
+
+boxplot(lprop*100 ~ chatchunk2, data=phonly,notch=TRUE,col=c("gray40","gray80"),main="Phase Percentage Laughter", xlab='Phase Type',ylab='Percentage Laughter')
+
+
+pdf('boxLinPhase.pdf',width=8, height = 5)
+boxplot(lprop*100 ~ chatchunk2, data=phonly,notch=TRUE,col=c("gray40","gray80"),main="Phase Percentage Laughter", xlab='Phase Type',ylab='Percentage Laughter')
+dev.off()
+
+par(mfrow=c(1,3))
+hist(phonly$sprop)
+hist(phonly$sprop[phonly$chatchunk=='o'])
+
+hist(phonly$sprop[phonly$chatchunk=='x'])
+
+par(mfrow=c(1,1))
+
+pdf('HistLinPhase.pdf',width=8, height = 3,col='black')
+par(mfrow=c(1,3))
+hist(phonly$sprop)
+hist(phonly$sprop[phonly$chatchunk=='o'])
+
+hist(phonly$sprop[phonly$chatchunk=='x'])
+dev.off()
+
+par(mfrow=c(1,1))
+```
+
+# Overlap distro in chat and chunk
+Use spnosil from above and shnosp to get barcharts of speech and overlap for chat / chunk only disregarding silence and counting single speech and overlap
+
+
+# Speech Proportions in Chat vs Chunk
+
+Proportion of overlap (0,1,2...) by chatchunk
+
+```{r}
+# Everything against chatchunk
+
+table(overlaps$nosp,overlaps$chatchunk2)
+
+prop.table(table(overlaps$nosp,overlaps$chatchunk2),2)*100
+
+# Ammend myta to make mytach - over chunks rather than conversations
+
+mytach <- function(x,nowhat) {
+    mytab <- tapply(x$dur,list(nowhat,x$chatchunk2),sum)
+    mytab[is.na(mytab)]<-0
+    
+    return(mytab)
+}
+
+# sil,speech - overlaps, nosp
+
+mytch <- mytach(overlaps,overlaps$shnosp)
+
+mytch
+
+prop.table(mytch,2)*100
+
+par(mfrow=c(1,2))
+barplot(prop.table(mytch,2)*100, main='Speech, Overlap, Silence (%) by Phase', col = c('black','gray40','gray80'),legend=rownames(mytch),xlab='Phase Type',ylab='Percentage of Floor Time',beside=TRUE,ylim=c(0,100))
+
+# speech no sil - spnosil, nosp
+
+spch <- mytach(spnosil,spnosil$shnosp)
+spch
+
+prop.table(spch,2)*100
+
+barplot(prop.table(spch,2)*100, main='Speech, Overlap (%) by Phase', col = c('gray40','gray80'),legend=rownames(spch),xlab='Phase Type',ylab='Percentage of Floor Time',beside=TRUE,ylim=c(0,100))
+par(mfrow=c(1,1))
+
+#now make for pdf
+
+pdf('spov_sxo2.pdf', width=8, height = 3)
+par(mfrow=c(1,2))
+barplot(prop.table(mytch,2)*100, main='Silence, Speech, Overlap (%) by Phase', col = c('black','gray40','gray80'),legend=rownames(mytch),xlab='Phase Type',ylab='Percentage of Floor Time',beside=TRUE,ylim=c(0,100))
+
+# speech no sil - spnosil, nosp
+
+spch <- mytach(spnosil,spnosil$shnosp)
+spch
+
+prop.table(spch,2)*100
+
+barplot(prop.table(spch,2)*100, main='Speech, Overlap (%) by Phase', col = c('gray40','gray80'),legend=rownames(spch),xlab='Phase Type',ylab='Percentage of Floor Time',beside=TRUE,ylim=c(0,100))
+par(mfrow=c(1,1))
+
+dev.off()
+par(mfrow=c(1,1))
+
+pdf('spov_sxo3.pdf', width=8, height = 5)
+
+barplot(prop.table(mytch,2)*100, main='Silence, Speech, Overlap (%) by Phase', col = c('black','gray40','gray80'),legend=rownames(mytch),xlab='Phase Type',ylab='Percentage of Floor Time',beside=TRUE,ylim=c(0,100))
+
+dev.off()
+```
+#GENDER IN SP AND OVERLAP
+```{r}
+# Ammend myta to make mytach - over chunks rather than conversations
+
+
+mytg<- function(x,nowhat) {
+    mytab <- tapply(x$dur,list(nowhat,x$spgen),sum)
+    mytab[is.na(mytab)]<-0
+    
+    return(mytab)
+}
+
+myg <- mytg(overlaps,overlaps$shnosp)
+
+myg
+
+prop.table(myg,2)*100
+
+par(mfrow=c(1,2))
+barplot(prop.table(myg,2)*100, main='Speech, Overlap, Silence (%) by Gender', col = c('black','gray40','gray80'),legend=rownames(myg),xlab='Gender',ylab='Percentage of Floor Time',beside=TRUE,ylim=c(0,100))
+
+# speech no sil - spnosil, nosp
+
+spg<- mytg(spnosil,spnosil$shnosp)
+spg
+
+prop.table(spg,2)*100
+
+barplot(prop.table(spg,2)*100, main='Speech, Overlap (%) by Gender', col = c('gray40','gray80'),legend=rownames(spg),xlab='Gender',ylab='Percentage of Floor Time',beside=TRUE,ylim=c(0,100))
+par(mfrow=c(1,1))
+
+#now make for pdf
+
+pdf('spov_sxo2GEN.pdf', width=8, height = 3)
+par(mfrow=c(1,2))
+barplot(prop.table(myg,2)*100, main='Silence, Speech, Overlap (%) by Gender', col = c('black','gray40','gray80'),legend=rownames(myg),xlab='Gender',ylab='Percentage of Floor Time',beside=TRUE,ylim=c(0,100))
+
+# speech no sil - spnosil, nosp
+
+spg2 <- mytg(spnosil,spnosil$shnosp)
+spg2
+
+prop.table(spch,2)*100
+
+barplot(prop.table(spg2,2)*100, main='Speech, Overlap (%) by Gender', col = c('gray40','gray80'),legend=rownames(spg2),xlab='Gender',ylab='Percentage of Floor Time',beside=TRUE,ylim=c(0,100))
+par(mfrow=c(1,1))
+
+dev.off()
+par(mfrow=c(1,1))
+
+
+```
+# Overlap - DISTRO OF % OVERLAP BY INDIV CHAT/CHUNK
+```{r}
+
+
+str(speechdf)
+table(df_all$tiertype)
+table(df_all$shnosp)
+table(speechdf$tiertype)
+table(speechdf$shnosp)
+nospeechdf<-df_all[df_all$tiertype != 'speak',]
+table(nospeechdf$tiertype)
+table(nospeechdf$shnosp)
+
+nospeechdf$otot<-{NA}
+nospeechdf$s1tot<-{NA}
+nospeechdf$s1otot<-{NA}
+nospeechdf$oprop<-{NA}
+nospeechdf$s1prop<-{NA}
+nospeechdf$siltot<-{NA}
+nospeechdf$silprop<-{NA}
+nospeechdf$silnum<-{NA}
+nospeechdf$silpropnum<-{NA}
+
+
+
+
+for(i in 1:length(nospeechdf$dur)) {
+    if (nospeechdf$tiertype[i]=='phases'){
+        t_name<-nospeechdf$t_name[i]
+
+        df_spov<-nospeechdf[((nospeechdf$t_name==t_name) & (nospeechdf$tiertype=='overlap')),]
+
+        nospeechdf$otot[i]<-sum(df_spov$dur[df_spov$shnosp=='2+'])
+        nospeechdf$s1tot[i]<-sum(df_spov$dur[df_spov$shnosp=='1'])
+        nospeechdf$s1otot[i]<-sum(nospeechdf$otot[i],nospeechdf$s1tot[i])
+        nospeechdf$oprop[i]<- nospeechdf$otot[i]/nospeechdf$s1otot[i]
+        nospeechdf$s1prop[i]<- nospeechdf$s1tot[i]/nospeechdf$s1otot[i]
+        # do for silences duration
+        nospeechdf$siltot[i]<-sum(df_spov$dur[df_spov$label=='{GS}'])
+        nospeechdf$silprop[i]<- (nospeechdf$siltot[i]/sum(df_spov$dur))*100
+        # do for silences incidence
+        nospeechdf$silnum[i]<-nrow(df_spov[df_spov$label=='{GS}',])
+        nospeechdf$silpropnum[i]<- (nospeechdf$silnum[i]/nrow(df_spov))*100        
+        
+    
+        
+    }
+}
+
+hist(nospeechdf$silprop)
+summary(nospeechdf$silprop)
+
+phonly<-nospeechdf[nospeechdf$tiertype=='phases',]
+
+summary(phonly)
+summary(nospeechdf$silprop)
+summary(phonly$silprop)
+summary(phonly$silprop[phonly$chatchunk=='x'])
+summary(phonly$silprop[phonly$chatchunk=='o'])
+summary(phonly$silpropnum[phonly$chatchunk=='x'])
+summary(phonly$silpropnum[phonly$chatchunk=='o'])
+
+wilcox.test(silprop~chatchunk, data = phonly)
+
+wilcox.test(silpropnum~chatchunk, data = phonly)
+
+par(mfrow=c(1,3))
+hist(phonly$oprop)
+hist(phonly$oprop[phonly$chatchunk=='o'])
+
+hist(phonly$oprop[phonly$chatchunk=='x'])
+
+par(mfrow=c(1,1))
+
+par(mfrow=c(1,3))
+hist(phonly$s1prop)
+hist(phonly$s1prop[phonly$chatchunk=='o'])
+
+hist(phonly$s1prop[phonly$chatchunk=='x'])
+
+par(mfrow=c(1,1))
+
+summary(phonly$s1prop)
+summary(phonly$s1prop[phonly$chatchunk=='o'])
+
+summary(phonly$s1prop[phonly$chatchunk=='x'])
+
+summary(phonly$oprop)
+summary(phonly$oprop[phonly$chatchunk=='o'])
+
+summary(phonly$oprop[phonly$chatchunk=='x'])
+
+wilcox.test(s1prop~chatchunk, data = phonly)
+wilcox.test(s1prop~chatchunk, data = phonly,alternate='less')
+wilcox.test(oprop~chatchunk, data = phonly)
+wilcox.test(oprop~chatchunk, data = phonly,alternate='greater')
+kruskal.test(oprop~chatchunk, data = phonly)
+
+boxplot(oprop*100 ~ chatchunk, data=phonly,notch=TRUE)
+
+boxplot(oprop*100 ~ chatchunk2, data=phonly,notch=TRUE,col=c("gray40","gray80"),main="Phase Percentage Overlap", xlab='Phase Type',ylab='Percentage Overlap')
+
+pdf('boxOinPhase.pdf',width=8, height = 5)
+boxplot(oprop*100 ~ chatchunk2, data=phonly,notch=TRUE,col=c("gray40","gray80"),main="Phase Percentage Overlap", xlab='Phase Type',ylab='Percentage Overlap')
+dev.off()
+
+# remove outlying chunk value for ltot and do again
+
+# remove
+# phonly <- phonly[-which.max(phonly$lprop),]
+# 
+# wilcox.test(sprop~chatchunk, data = phonly)
+# wilcox.test(lprop~chatchunk, data = phonly)
+# kruskal.test(lprop~chatchunk, data = phonly)
+# 
+# boxplot(lprop*100 ~ chatchunk, data=phonly,notch=TRUE)
+
+
+
+```
+
+
+# LOOK AT DISTANCE FROM OVERLAPS TO END OF CHAT CHUNNK
+
+```{r}
+# use spnosil
+# histogram of distance from any overlap to end of chat or chunk
+over2<-spnosil[spnosil$nosp>=2,]
+summary(over2)
+median(over2$dnext)
+over2[over2$dnext == max(over2$dnext),]
+summary(df_all$dur[df_all$tier=='phases'])
+
+hist(df_all$dur[df_all$tier=='phases'], breaks=seq(0,300,by=5))
+
+summary(over2$dnext)
+hist(over2$dnext, breaks=seq(0,300,by=5))
+
+summary(over2$dlast)
+hist(over2$dlast, breaks=seq(0,300,by=5))
+
+hist(log(df_all$dur[df_all$tier=='phases']))
+
+hist(log(over2$dnext))
+
+hist(log(over2$dlast))
+
+par(mfrow=c(1,3))
+boxplot(over2$dnext~over2$chatchunk)
+hist(over2$dnext[over2$chatchunk=='o'])
+hist(over2$dnext[over2$chatchunk=='x'])
+
+# Proportional distance from next boundary
+
+median(over2$dnext/over2$chl)
+
+par(mfrow=c(1,2))
+hist(over2$dnext/over2$chl)
+boxplot(over2$dnext/over2$chl~over2$chatchunk)
+
+wilcox.test(dnext/chl ~ chatchunk, data = over2)
+
+```
+
+
+
+# Chunks per Person
+
+```{r}
+
+# see if there is an even distribution of chunks per person in conversations
+
+table(chunkonly$owner)
+chunkonly$owner  <-as.character(chunkonly$owner)
+chunkonly$owner2<-chunkonly$owner
+table(chunkonly$owner, chunkonly$conv)
+
+
+
+prop.table(table(chunkonly$owner, chunkonly$conv),2)*100
+
+barplot(prop.table(table(chunkonly$owner, chunkonly$conv),2)*100)
+barplot(prop.table(table(chunkonly$owner, chunkonly$conv),2)*100,beside=TRUE,xlab='Conversation',ylab='Percentage of Chunks',main= 'Distribution of Chunks per Speaker by Conversation',ylim=c(0,70))
+
+
+
+
+# create owner2 so speakers are labelled 1,2,3,4,5
+for(i in 1:length(chunkonly$dur)){
+    if (chunkonly$owner[i] %in% c('a','f','j','n','q','u')){
+        chunkonly$owner2[i]<-'s1'
+        
+    }
+    if (chunkonly$owner[i] %in% c('b','g','k','o','r','v')){
+        chunkonly$owner2[i]<- 's2'
+    }
+    if (chunkonly$owner[i] %in% c('c','h','l','p','s','w')){
+        chunkonly$owner2[i]<- 's3'
+    }
+    if (chunkonly$owner[i] %in% c('d','m','t','x')){
+        chunkonly$owner2[i]<- 's4'
+    }
+    if (chunkonly$owner[i] %in% c('e','y')){
+        chunkonly$owner2[i]<- 's5'
+    }
+}
+
+table(chunkonly$owner2)
+table(chunkonly$owner2, chunkonly$conv)
+prop.table(table(chunkonly$owner2, chunkonly$conv),2)*100
+
+barplot(prop.table(table(chunkonly$owner2, chunkonly$conv),2)*100,beside=TRUE,xlab='Conversation',ylab='Percentage of Chunks',main= 'Distribution of Chunks per Speaker by Conversation',ylim=c(0,70))
+
+
+pdf('chperP.pdf', width=8, height = 5)
+barplot(prop.table(table(chunkonly$owner2, chunkonly$conv),2)*100,beside=TRUE,xlab='Conversation',ylab='Percentage of Chunks',main= 'Distribution of Chunks per Speaker by Conversation',ylim=c(0,70))
+dev.off()
+
+barplot(table(chunkonly$owner, chunkonly$conv))
+barplot(table(chunkonly$owner, chunkonly$conv),beside=TRUE)
+```
+
+# Chunk/chat bigrams
+
+```{r}
+# get chatchunk in order will have to order phases df by conversation and then by start time, add another vector with nextphase, and one with phase_nextphase as string. Then do counts
+
+summary(dfp)
+
+biphase<-dfp
+
+biphase$tmin[1:8]
+biphase$secondphase <-'unk'
+biphase$firstphase <- as.character(biphase$chatchunk)
+table(biphase$secondphase)
+
+biphase$secondphase[length(biphase$conv)]<-biphase$firstphase[1]
+table(biphase$secondphase)
+
+for (i in 1:(length(biphase$conv)-1)) {
+    biphase$secondphase[i]<-biphase$firstphase[i+1]
+    biphase$bigram[i]<-paste(biphase$firstphase[i],biphase$secondphase[i],sep='_')
+}
+
+table(biphase$secondphase)
+
+summary(biphase$secondphase)
+
+biphase$firstphase[1:10]
+biphase$secondphase[1:10]
+biphase$bigram[1:10]
+
+table(biphase$bigram)
+
+# now do trigrams
+
+biphase$thirdphase<-'unk'
+
+biphase$thirdphase[length(biphase$conv)]<-biphase$firstphase[2]
+biphase$thirdphase[length(biphase$conv)-1]<- biphase$firstphase[1]
+
+biphase[567:570,]
+
+for (i in 1:(length(biphase$conv)-2)) {
+    biphase$thirdphase[i]<-biphase$firstphase[i+2]
+    biphase$trigram[i]<-paste(biphase$firstphase[i],biphase$secondphase[i],biphase$thirdphase[i],sep='_')
+}
+
+biphase$firstphase[1:10]
+biphase$secondphase[1:10]
+biphase$thirdphase[1:10]
+biphase$bigram[1:10]
+biphase$trigram[1:10]
+
+table(biphase$trigram)
+
+# next work out if probability of xx get higher later in conversations - so first split conversations into first half and second half and get tables of bigrams for both halfs - should this be divided by time - if so get tmax - tmin/2 and find first phase with tmin > midpoint
+
+biA<-biphase[as.character(biphase$conv)=='A',]
+
+midA <- max(biA$tmax) - min(biA$tmin)/2
+midA
+summary(biA[,1:5])
+
+omidA <-(max(biphase$tmax[as.character(biphase$conv)=='A']) - min(biphase$tmin[as.character(biphase$conv)=='A']))/2
+omidA
+
+omidB <- (max(biphase$tmax[as.character(biphase$conv)=='B']) - min(biphase$tmin[as.character(biphase$conv)=='B']))/2
+omidB
+omidC <- (max(biphase$tmax[as.character(biphase$conv)=='C']) - min(biphase$tmin[as.character(biphase$conv)=='C']))/2
+omidC
+omidD <- (max(biphase$tmax[as.character(biphase$conv)=='D']) - min(biphase$tmin[as.character(biphase$conv)=='D']))/2
+omidD
+omidE <- (max(biphase$tmax[as.character(biphase$conv)=='E']) - min(biphase$tmin[as.character(biphase$conv)=='E']))/2
+omidE
+omidF <- (max(biphase$tmax[as.character(biphase$conv)=='F']) - min(biphase$tmin[as.character(biphase$conv)=='F']))/2
+omidF
+
+biphase$timehalf <- 'firsthalf'
+
+for (i in 1:(length(biphase$conv))) {
+    if (as.character(biphase$conv[i])=='A') {
+        if (biphase$tmin[i] > omidA) {
+            biphase$timehalf[i]<- 'secondhalf'
+        }
+    }
+    if (as.character(biphase$conv[i])=='B') {
+        if (biphase$tmin[i] > omidB) {
+            biphase$timehalf[i]<- 'secondhalf'
+        }
+    }
+    if (as.character(biphase$conv[i])=='C') {
+        if (biphase$tmin[i] > omidC) {
+            biphase$timehalf[i]<- 'secondhalf'
+        }
+    }
+    if (as.character(biphase$conv[i])=='D') {
+        if (biphase$tmin[i] > omidD) {
+            biphase$timehalf[i]<- 'secondhalf'
+        }
+    }
+    if (as.character(biphase$conv[i])=='E') {
+        if (biphase$tmin[i] > omidE) {
+            biphase$timehalf[i]<- 'secondhalf'
+        }
+    }
+    if (as.character(biphase$conv[i])=='F') {
+        if (biphase$tmin[i] > omidF) {
+            biphase$timehalf[i]<- 'secondhalf'
+        }
+    }
+
+}
+
+table(biphase$timehalf,biphase$conv)
+table(biphase$bigram,biphase$timehalf)
+table(biphase$bigram[biphase$chatchunk=='x'],biphase$timehalf[biphase$chatchunk=='x'])
+prop.table(table(biphase$bigram[biphase$chatchunk=='x'],biphase$timehalf[biphase$chatchunk=='x']))
+prop.table(table(biphase$bigram[biphase$chatchunk=='x'],biphase$timehalf[biphase$chatchunk=='x']),2)
+
+xphase<-biphase[biphase$chatchunk=='x',]
+xphase<-xphase[xphase$bigram != 'o_x',]
+
+table(xphase$bigram,xphase$timehalf)
+prop.table(table(xphase$bigram,xphase$timehalf),2)*100
+
+rnam<-rownames(table(xphase$bigram,xphase$timehalf))
+barplot(prop.table(table(xphase$bigram,xphase$timehalf),2)*100,beside=TRUE,legend= rnam)
+
+# get data in 10 minute intervals up to 30 mins. So three divisions 
+
+biphase$fivemin <- 'after_30'
+
+biphaseA<- biphase[biphase$conv=='A',]
+biphaseB<- biphase[biphase$conv=='B',]
+biphaseC<- biphase[biphase$conv=='C',]
+biphaseD<- biphase[biphase$conv=='D',]
+biphaseE<- biphase[biphase$conv=='E',]
+biphaseF<- biphase[biphase$conv=='F',]
+
+
+summary(biphaseA)
+
+```
+
+ggplot2(biphase, aes(as.factor(timehalf), V3, fill = V2)) + 
+        geom_bar(stat = "identity", width = 0.2, position = "dodge") +
+        labs(list(x = "x", y = "count",fill = "group"))
+
+```{r}
+
+# bin_them <- function(df) {
+#     tminimum <- min(df$tmin, na.rm=TRUE)
+#     tminimum
+#     tmaximum <- max(df$tmax,na.rm=TRUE)
+#     tmaximum
+# 
+# for (i in 1:length(df$conv)) {
+# 
+#     if (df$tmax[i] <= (tminimum + 1800)) {
+#         df$fivemin[i] <- 30
+#         }
+#     if (df$tmax[i] <= (tminimum + 1650)) {
+#         df$fivemin[i] <- 27.5
+#         }
+#     if (df$tmax[i] <= (tminimum + 1500)) {
+#         df$fivemin[i] <- 25
+#     }
+#       if (df$tmax[i] <= (tminimum + 1350)) {
+#         df$fivemin[i] <- 22.5
+#       }
+#     if (df$tmax[i] <= (tminimum + 1200)) {
+#         df$fivemin[i] <- 20
+#     }
+#     if (df$tmax[i] <= (tminimum + 1050)) {
+#         df$fivemin[i] <- 17.5
+#         }
+# 
+#     if (df$tmax[i] <= (tminimum + 900)) {
+#         df$fivemin[i] <- 15
+#         }
+#     if (df$tmax[i] <= (tminimum + 750)) {
+#         df$fivemin[i] <- 12.5
+#         }
+#     if (df$tmax[i] <= (tminimum + 600)) {
+#         df$fivemin[i] <- 10
+#         }
+# 
+#     if (df$tmax[i] <= (tminimum + 450)) {
+#         df$fivemin[i] <- 7.5
+#         }
+#     if (df$tmax[i] <= (tminimum + 300)) {
+#         df$fivemin[i] <- 5
+#     }
+#     if (df$tmax[i] <= (tminimum + 150)) {
+#         df$fivemin[i] <- 2.5
+#         }
+#         
+#     }
+#     
+#     return(df)
+# }
+
+bin_them <- function(df) {
+    tminimum <- min(df$tmin, na.rm=TRUE)
+    tminimum
+    tmaximum <- max(df$tmax,na.rm=TRUE)
+    tmaximum
+
+for (i in 1:length(df$conv)) {
+        
+    if (df$tmax[i] <= (tminimum + 1800)) {
+        df$fivemin[i] <- '10'
+        }
+# 
+#     if (df$tmax[i] <= (tminimum + 1500)) {
+#         df$fivemin[i] <- 'a20_25'
+#         }
+    if (df$tmax[i] <= (tminimum + 1200)) {
+        df$fivemin[i] <- '20'
+        }
+    # if (df$tmax[i] <= (tminimum + 900)) {
+    #     df$fivemin[i] <- 'a10_15'
+    #     }
+    # 
+    # if (df$tmax[i] <= (tminimum + 600)) {
+    #     df$fivemin[i] <- "a5_10"
+    #     }
+
+    if (df$tmax[i] <= (tminimum + 600)) {
+        df$fivemin[i] <- "30"
+        }
+
+    }
+
+    return(df)
+}
+
+bipA <-bin_them(biphaseA)
+bipB <-bin_them(biphaseB)
+bipC <-bin_them(biphaseC)
+bipD <-bin_them(biphaseD)
+bipE <-bin_them(biphaseE)
+bipF <-bin_them(biphaseF)
+
+dAB <-rbind(bipA,bipB)
+dABC <-rbind(dAB,bipC)
+dABCD <- rbind(dABC,bipD)
+dABCDE <- rbind(dABCD,bipE)
+biphase2<- rbind(dABCDE, bipF)
+
+bipA$fivemin
+
+table(bipA$fivemin)
+
+table(bipA$fivemin[bipA$chatchunk=='x'])
+
+table(biphase2$fivemin)
+table(biphase2$fivemin,biphase2$conv)
+table(biphase2$conv)
+table(biphase$conv)
+
+first30<-biphase2[biphase2$fivemin!='after_30',]
+#first30$fivemin<-as.numeric(first30$fivemin)
+table(first30$fivemin,first30$conv)
+
+first30x<-first30[first30$chatchunk=='x',]
+table(first30x$fivemin)
+
+summary(first30)
+summary(first30x)
+
+table(first30x$fivemin,first30x$conv)
+
+rnams<-c('chunk-chunk','chunk-chat')
+barplot(prop.table(table(first30x$bigram,first30x$fivemin),2)*100,beside=TRUE,ylab='Probability',xlab='Time',legend=rnams)
+
+#png('trans.png',width=8, height = 5)
+png('trans.png')
+#rnams<-rownames(table(first30x$bigram,first30x$fivemin))
+rnams<-c('chunk-chunk','chunk-chat')
+barplot(prop.table(table(first30x$bigram,first30x$fivemin),2)*100,beside=TRUE,ylab='Probability',xlab='Time', main='Distribution of Phase Change Bigrams in First 30 Minutes')
+
+dev.off()
+
+barplot(prop.table(table(first30x$bigram,first30x$fivemin),2)*100,beside=TRUE)
+
+
+my30x <- prop.table(table(first30x$bigram,first30x$fivemin),2)*100
+
+my30x
+
+str(my30x)
+
+my30x[1,]
+
+
+
+
+plot(my30x[1,],type='l',lty=2,ylim=c(0,80),ylab='Probability(%)', xlab='Time(6 second bins)',pch=19)
+lines(my30x[2,])
+
+```
+```{r}
+bouts <- df_all[df_all$tierf == "phases",]
+bouts$label2f <- as.factor(bouts$label2)
+table(bouts$label2f)
+table(bouts$conv, bouts$label2f)
+
+table(bouts$owner, bouts$label2)
+# sum(bouts$dur[bouts$label2=="x" & bouts$conv =="A"])
+# sum(bouts$dur[bouts$label2=="o" & bouts$conv =="A"])
+# sum(bouts$dur[bouts$label2=="x" & bouts$conv =="B"])
+# sum(bouts$dur[bouts$label2=="o" & bouts$conv =="B"])
+# sum(bouts$dur[bouts$label2=="x" & bouts$conv =="C"])
+# sum(bouts$dur[bouts$label2=="o" & bouts$conv =="C"])
+# sum(bouts$dur[bouts$label2=="x" & bouts$conv =="D"])
+# sum(bouts$dur[bouts$label2=="o" & bouts$conv =="D"])
+# sum(bouts$dur[bouts$label2=="x" & bouts$conv =="E"])
+# sum(bouts$dur[bouts$label2=="o" & bouts$conv =="E"])
+# sum(bouts$dur[bouts$label2=="x" & bouts$conv =="F"])
+# sum(bouts$dur[bouts$label2=="o" & bouts$conv =="F"])
+```

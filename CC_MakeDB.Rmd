@@ -1,0 +1,345 @@
+---
+title: "CC Database Creation"
+author: "Emer Gilmartin"
+date: "23 August 2016"
+output: pdf_document
+---
+```{r}
+library(knitr)
+opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+```
+# Background #
+
+Casual conversation seems to occur in phases or bouts, thus sharing the load among participants. 
+This can take the form of discussions where two or more participants contribute significantly, or 'long turns' where one participant dominates the conversation, often through narrative or giving an extended explanation/opinion. These one participant dominated bouts will hencforth be termed 'dominated'.
+
+I would like to know if these 'bouts', particularly the dominated bouts, have characteristic patterns of silence and speech.
+
+## Definitions ##
+
+
+
+## Research Questions ##
+
+
+# Dataset #
+First, set working directory to CC_DATA_SEPT
+
+
+```{r}
+getwd()
+
+setwd("/Users/emergilmartin/Dropbox/PHD_final/CASUAL_EG_KL_JE_2016/CC_DATA_EG_KL_0616/CC_DATA_SEPT")
+
+getwd()
+```
+
+### Make dataframe ###
+Make data frame for 6 conversations from text file containing all six conversations - each line is an interval from Praat TG and contains 5 comma separated values
+
+* Conversation Id
+* Start time
+* tier
+* label
+* Stop time
+
+There are three classes of tier
+
+* Speaker - lower case letter denotes speaker - these are unique for each speaker in each conversation (although there are cases where the same speaker appears in different corpora)
+* Overlap - each interval is coded with who was speaking/laughing during the interval e.g. a{LG}b{SP} means participant a was speaking and b was laughing at the time, {GS} means nobody was speaking. Overlap tier was generated using a Praat script adapted from José Joaquín Atria (Get ref). NB: In this version, silence is defined as the absence of any vocalisation - so laughter is counted as non-silence for overlap silence purposes.
+* Phase - each interval is coded with indicator of chat(o) or chunk(x) plus type of chunk (not very accurate), and an indicator of chunk owner expressed as speaker letter
+
+First, read in text file (SOC - speech, overlap, chunks)
+
+```{r}
+cc_df <- read.csv("BESTENDtest.txt",header=F,sep=',',stringsAsFactors = F)
+```
+
+Set column names
+```{r}
+names(cc_df)<- c("conv","tmin","tier","label","tmax")
+summary(cc_df)
+```
+
+Make factorized version of tier, tierf and factorize conv tier, add dur (duration) column
+```{r}
+cc_df$tierf <- as.factor(cc_df$tier)
+cc_df$conv <- as.factor(cc_df$conv)
+cc_df$dur <- cc_df$tmax - cc_df$tmin
+```
+
+Make new labels column label2 which has x or o for phases in place of longer labels and same labels for everything else
+
+First, make label2 same as label
+
+```{r}
+cc_df$label2 <- cc_df$label
+summary(cc_df)
+```
+
+Next, create function to change phase labels to x or o in label2
+
+```{r}
+xo_lab <- function(df) {
+    # df is a dataframe - want to get first character of "phases" label and insert into label2 column
+    
+    l1 <- length(df$label)
+    
+    for (i in 1:l1) {
+        oldlab <- df$label[i]
+       
+        if (df$tier[i] == "phases") {
+            df$label2[i] <- substring(oldlab,1,1)
+           
+            
+        }
+    }
+    return(df)
+    
+}
+```
+
+apply to cc_df to make cc_df2
+
+```{r}
+cc_df2 <- xo_lab(cc_df)
+head(cc_df2,10)
+head(cc_df2$label2[cc_df2$tier == "phases"])
+
+```
+
+Now we want to make new columns with distance from start of each interval in df to 'containing' or 'including' phase. Will use  get_nl
+### Function to get distance for tmin of each line to the tmin and tmax of 'including' phenomenon ###
+
+This function takes a dataframe and a tier name phenoB (e.g. topic or bout)
+Adds new columns - dlast, dnext, phenoB
+It then finds which interval on the phenoB tier contains the start of each item  in df, so for each line in df it could find which bout the phenomenon starts in.
+It adds the label name to phenoB, the distance from start of phenoB to start of item, and the distance from the start of item to the end of phenoB
+
+```{r}
+get_nl <- function(df, phenoB) {
+    # df is a dataframe, phenoB is the name of the tier to be used as reference
+    #first make new columns in df for distance from last and distance to next amd topic name
+    
+    df$dlast <- NA
+    df$dnext <- NA
+    df$t_name <- NA
+    y <-head(df)
+    print(y)
+    
+    # now make dataframe of phenoB 
+    phenoB_slice <- df[df$tier == phenoB,]
+    print(head(phenoB_slice))
+    
+    for (i in seq_along(df$tmin)) {
+        for (j in seq_along(phenoB_slice$tmin)) {
+            # for each line in phenoB_slice
+            if ((phenoB_slice$tmin[j] <= df$tmin[i]) & (df$tmin[i] < phenoB_slice$tmax[j])) {
+                # print("in loop 2")
+                # print(phenoB_slice$label[j])
+                df$dlast[i] <- df$tmin[i] - phenoB_slice$tmin[j]
+                df$dnext[i] <- phenoB_slice$tmax[j] - df$tmin[i]
+                df$t_name[i] <- phenoB_slice$label[j]
+                # print(df[i,])
+            }
+        }
+    }
+    return(df)
+    
+}
+```
+
+To use get_nl on cc_df2, need to run get_nl on each conversation and then concatenate resulting dataframes.
+
+First, make six dfs, one for each conversation, then run get_nl on each, and finally rbind them together (must find out if rbind can act on more than 2 dfs at a time)
+
+```{r}
+df_A <- cc_df2[cc_df2$conv == "A",]
+df_B <- cc_df2[cc_df2$conv == "B",]
+df_C <- cc_df2[cc_df2$conv == "C",]
+df_D <- cc_df2[cc_df2$conv == "D",]
+df_E <- cc_df2[cc_df2$conv == "E",]
+df_F <- cc_df2[cc_df2$conv == "F",]
+df_A_Nl <- get_nl(df_A,"phases")
+df_B_Nl <- get_nl(df_B,"phases")
+df_C_Nl <- get_nl(df_C,"phases")
+df_D_Nl <- get_nl(df_D,"phases")
+df_E_Nl <- get_nl(df_E,"phases")
+df_F_Nl <- get_nl(df_F,"phases")
+df_AB <- rbind(df_A_Nl,df_B_Nl)
+df_ABC <- rbind (df_AB, df_C_Nl)
+df_ABCD <- rbind (df_ABC, df_D_Nl)
+df_ABCDE <- rbind (df_ABCD, df_E_Nl)
+df_ABCDEF <- rbind (df_ABCDE, df_F_Nl)
+
+#run summary on new df and original for sanity check
+summary(df_ABCDEF)
+summary(cc_df)
+```
+
+Find out for chunks who is owner of chunk
+Create function get_won which looks at t_name, if it begins with 'o', then owner is everyone, if it begins with x, then owner is speaker of chunk
+ and also creates chatchunk column with x or o 
+
+``` {r}
+get_own <- function(df) {
+    # df is a dataframe - 
+    # create owner tier with NA, get first character of t_name tier - if "o", df$owner is "all", if "x", df$owner is 5th character of t_name
+    
+    df[,"owner"] <- NA
+    df[,"chatchunk"] <- NA
+    
+    l1 <- length(df$t_name)
+    
+    for (i in 1:l1) {
+        
+        t_name1 <- df$t_name[i]
+        type_1 <- substring(t_name1,1,1)
+        
+        
+        if (type_1 == "o") {
+            df$owner[i] <- "everyone"
+            df$chatchunk[i] <- "o"
+            
+            
+        }else if (type_1 == "x") {
+            df$owner[i] <- substring(df$t_name[i],5,5)
+            df$chatchunk[i] <- "x"
+        }
+    }
+    return(df)
+    
+}
+```
+
+add owner and chatchunk column
+
+``` {r}
+
+df_all <- get_own(df_ABCDEF)
+head(df_all, 30)
+tail(df_all,30)
+
+```
+add labelf, factorized version of label column
+```{r}
+df_all$labelf<-as.factor(df_all$label)
+
+```
+
+### Sanity Check
+Create sub dfs for each conversation and table the tierf row to check that all chunks owned by speakers belonging to that conversation!!
+
+```{r}
+df_A <- df_all[df_all$conv=="A",]
+table(df_A$tierf)
+df_B <- df_all[df_all$conv=="B",]
+table(df_B$tierf)
+df_C <- df_all[df_all$conv=="C",]
+table(df_C$tierf)
+df_D <- df_all[df_all$conv=="D",]
+table(df_D$tierf)
+df_E <- df_all[df_all$conv=="E",]
+table(df_E$tierf)
+df_F <- df_all[df_all$conv=="F",]
+table(df_F$tierf)
+```
+## Add gender columns for speaker and for chunk owner
+
+```{r}
+df_all$spgen <- rep('none', length(df_all$tier))
+fem <- c('a','e','g','k','o','p','q','t','u','x','y')
+mas <- c('b','c','d','f','h','j','l','m','n','r','s','v','w')
+
+for (i in 1:length(df_all$spgen)) {
+    if (df_all$tier[i] %in% fem)
+    {df_all$spgen[i] <- 'f'
+    } else if (df_all$tier[i] %in% mas)
+    { df_all$spgen[i] <- 'm'
+    }
+}
+
+df_all$chgen <- rep('none',length(df_all$owner))
+for (i in 1:length(df_all$chgen)) {
+    if (df_all$owner[i] %in% fem)
+    {df_all$chgen[i] <- 'f'
+    } else if (df_all$owner[i] %in% mas)
+    { df_all$chgen[i] <- 'm'
+    }
+}
+
+head(df_all)
+table(df_all$spgen)
+table(df_all$chgen)
+table(df_all$chatchunk)
+```
+
+## Final Dataset and variables
+
+factorize some variables and summarise final df and get list of columns in df_all
+
+```{r}
+# factorize owner, chatchunk,spgen, chgen 
+df_all$owner <- as.factor(df_all$owner)
+df_all$chatchunk <- as.factor(df_all$chatchunk)
+df_all$spgen <- as.factor(df_all$spgen)
+df_all$chgen <- as.factor(df_all$chgen)
+
+# add chl - length of phase where label falls
+for (i in 1:length(df_all$dur)) {
+    nowch <- df_all$t_name[i]
+    chlen <- df_all$dur[df_all$label==nowch]
+    df_all$chl[i] <-chlen
+}
+
+# check chl
+
+summary(df_all)
+names(df_all)
+```
+Variable | Type | Description
+---------|----- | -----------------------
+conv     | factor | Index of which conversation from A to F
+---------|----- | -----------------------
+tmin     | num  | Start time for interval
+---------|----- | -----------------------
+tier | char | Praat tier interval came from - a,b, c.. for speakers, overlap, or phases (renamed to phases in txt file from chunks in Praat)
+---------|----- | -----------------------
+label | char | label of Praat interval - for speakers ({SP}, {SL}, {LG}), for overlap code of who and what is present in overlap or {GS} for global silence, for phases(chunks) code for chat or chunk beginning with o or x and with 5th character in chunk labels denoting owner of chunk
+---------|----- | -----------------------
+tmax | num | end time for interval
+---------|----- | -----------------------
+tierf | factor | tier factorized
+---------|----- | -----------------------
+dur | num | duration of interval
+---------|----- | -----------------------
+label2 | char | same as label but has "x" or "o" instead of full chat or chunk labels
+---------|----- | -----------------------
+labelf | factor | same as label but has "x" or "o" instead of full chat or chunk labels and is factorised
+---------|----- | -----------------------
+dlast | num | distance from beginning of enclosing phase - result of running get_nl(phases) on each conversation subsetted from df - maybe add line to get_nl so it gives more info on which phenomenon it's been run on
+---------|----- | -----------------------
+dnext | num | distance from end of enclosing phase 
+---------|----- | -----------------------
+t_name | char | name of chunk or chat
+---------|----- | -----------------------
+owner | factor | generated using get_owner function from t_name
+---------|----- | -----------------------
+spgen | factor | gender of speaker (when tier is a speaker), else none
+---------|----- | -----------------------
+chgen | factor | gender of chunk owner
+---------|----- | -----------------------
+chatchunk | factor | whether part of chat or chunk
+---------|----- | -----------------------
+chl       | num | length of phase where label falls
+---------|----- | -----------------------
+
+# EXPORT FINAL DATASET AS ccdf.csv and as dataframe ccdf.Rda - use saveRDS so it can be loaded under a different name
+
+```{r}
+write.csv(df_all, "ccdf.csv", row.names=FALSE)
+saveRDS(df_all, "ccdf.Rda")
+```
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
