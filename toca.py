@@ -8,7 +8,7 @@ def makeca(infile,outfile):
 
     line = infile1.readline()
     outfile.write(line)
-    coltext = {'c':'<span style="color:#000000">','a':'<span style="color:#B404AE">','d':'<span style="color:#0040FF">','e':'<span style="color:#088A08">','b':'<span style="color:#FF0000">'}
+    coltext = {'jens':'<span style="color:#000000">','catha':'<span style="color:#B404AE">','nick':'<span style="color:#0040FF">','nike':'<span style="color:#088A08">','fred':'<span style="color:#FF0000">'}
     colwrite = '<span style="color:#000000">'
     
     
